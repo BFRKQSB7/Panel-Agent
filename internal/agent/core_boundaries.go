@@ -130,6 +130,22 @@ func (m *CoreManager) captureCandidate(ctx context.Context, process coreProcess)
 	return nil
 }
 
+func (m *CoreManager) captureLostCandidate(ctx context.Context, found bool) error {
+	if found || m.state.Candidate == nil {
+		return nil
+	}
+	switch m.state.Phase {
+	case "starting", "checking", "restoring":
+	default:
+		return nil
+	}
+	name, err := m.captureRecordBoundary(ctx, m.state.Candidate, true)
+	if err != nil {
+		return err
+	}
+	return m.finishBoundary(name, false)
+}
+
 func validBoundaryName(name string) bool {
 	return strings.HasPrefix(name, "boundary-") && strings.HasSuffix(name, ".json") &&
 		security.IsUUIDv4(strings.TrimSuffix(strings.TrimPrefix(name, "boundary-"), ".json"))

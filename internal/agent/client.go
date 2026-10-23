@@ -109,7 +109,10 @@ func (c *Client) EnableCore(ctx context.Context, binaryPath string, developmentL
 		return err
 	}
 	c.core = manager
-	return manager.Recover(ctx)
+	if err := manager.Recover(ctx); err != nil {
+		return err
+	}
+	return manager.ReconcileExpiration(ctx)
 }
 
 func (c *Client) CompletePairing(ctx context.Context) error {
@@ -181,9 +184,21 @@ func (c *Client) acceptRegistration(response protocol.RegisterResponse) error {
 	return c.store.Save(c.identity)
 }
 
-func (c *Client) SyncOnce(ctx context.Context) error {
+func (c *Client) SyncOnce(ctx context.Context) (syncErr error) {
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
+	if c.core != nil {
+		defer func() {
+			if ctx.Err() == nil {
+				syncErr = errors.Join(syncErr, c.core.ReconcileExpiration(ctx))
+			}
+		}()
+	}
+	if c.core != nil {
+		if err := c.core.ReconcileExpiration(ctx); err != nil {
+			return err
+		}
+	}
 	if c.identity.Pending {
 		if err := c.CompletePairing(ctx); err != nil {
 			return err
@@ -316,6 +331,13 @@ func (c *Client) reportStatus(ctx context.Context) error {
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, request any, bearer string, response any) (int, error) {
+	if c.core != nil {
+		if expiry := c.core.NextExpiry(); !expiry.IsZero() {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, expiry)
+			defer cancel()
+		}
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return 0, fmt.Errorf("encode control message: %w", err)
@@ -386,6 +408,13 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 			failed = false
 			backoff = time.Second
+		}
+		if c.core != nil {
+			if expiry := c.core.NextExpiry(); !expiry.IsZero() {
+				if until := time.Until(expiry); until < wait {
+					wait = max(until, time.Millisecond)
+				}
+			}
 		}
 		timer := time.NewTimer(wait)
 		select {

@@ -5,6 +5,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
 )
@@ -51,6 +52,12 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 		clients := []any{}
 		onlyDevelopment := len(credentials) > 0
 		for _, credential := range credentials {
+			if credential.ExpiresAt != "" {
+				expiry, _ := time.Parse(time.RFC3339, credential.ExpiresAt)
+				if !time.Now().Before(expiry) {
+					continue
+				}
+			}
 			onlyDevelopment = onlyDevelopment && credential.Development
 			clients = append(clients, map[string]any{"id": credential.UUID, "email": credential.Email, "level": 0})
 			result.Mappings = append(result.Mappings, StatMapping{UserID: credential.UserID, NodeID: node.ID, Email: credential.Email})

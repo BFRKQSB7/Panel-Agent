@@ -67,11 +67,37 @@ Linux Agent 使用已验证的 Xray **26.10.21** 可执行文件。以下命令�
 
 `agent-data/core/` 保存权限 0600 的配置及 journal，目录必须为 0700；不得手工编辑、跨机器复制或删除。只保留 Current、上一成功 LKG 和正在应用的候选配置。重启前保留旧统计映射与不清零的累计读数，候选尚未确认时的可观测流量也保留；`boundaries/` 是等待后续账本消费的累计观察，不能直接相加。固定 Stats API 不能原子完成采样和停止，边界明确记录不可观测尾部；丢失 Core 时记录 gap，不伪造零用量。目前达到 126 份待消费边界时拒绝新应用，额外两份保留给候选故障恢复，不能删除观察来绕过上限。持久账本任务将接入消费。
 
+到期处理还会在该目录保存 Current/LKG 所需的私有原始快照和最新已确认的授权摘要。恢复旧配置时，只保留最新已确认配置仍允许的节点、用户与 UUID，不能重新启用已撤销入口或轮换前的秘密；这可能使部分用户暂时不可用，但不会恢复已撤销的权限。旧版本回滚源没有足够授权信息时拒绝恢复该源。到期后重启会先重新生成并检查配置，不会从 LKG 恢复过期凭证；确认过的私有策略文件丢失时停止受管 Core，不生成替代凭证。
+
 Core 不写 access/error 日志，Agent 每次连续失联只输出一次有长度限制的错误，恢复时输出一次；常驻运行时应由服务管理器限制 stderr 保存量。Windows 可运行 Panel 和控制通道，但本阶段受管 Core 的进程恢复实现仅支持 Linux。
 
 ### 隔离回环测试
 
 固定 Xray 对服务端代理默认阻止私网和回环目标，参见 [Freedom 的默认策略](https://xtls.github.io/en/config/outbounds/freedom.html)。仅在隔离数据目录和全部凭证明确标识为开发凭证的 Node 上，可追加 `--development-loopback-test`；它只允许这些 Node 访问 TCP `127.0.0.1:18080`、UDP `127.0.0.1:18081`，普通 Node 不加入例外路由。该开关默认关闭，模式写入 journal，后续恢复必须使用相同模式；不要对生产目录启用。
+
+## 用户、组与正式连接凭证
+
+在“用户组与节点组”页面先创建节点组并勾选节点，再创建用户组并关联节点组；随后在“用户管理”中选择一个用户组创建用户。每个用户恰好属于一个用户组，重叠节点组会去重；实验节点通过独立组隔离。把新节点加入已有授权组即可让相关用户获得它，无需逐个修改用户。停用、删除或移出组会发布新的机器配置，机器失联不会删除 Node 定义。
+
+每个正式用户有独立 VLESS UUID，在同协议的所有授权节点复用；不同 Node 使用稳定且独立的统计标签。UUID 由 master key 可恢复加密保存，和后续页面/订阅 Token 独立。“查看正式连接凭证”展示管理员可复制的 UUID，“轮换连接凭证”是单独操作，没有双凭证过渡期；Agent 成功应用后旧 UUID 失效，现存连接也会随 Core 重启结束。删除后同名重建获得全新的用户 ID 与 UUID，旧身份保留用于迟到流量归属。
+
+到期时间在页面中使用 **UTC**，留空为永久；到期不改写手动启停状态，所以可以同时看到“手动停用”和“已到期”。Node 快照可携带明确到期时间，Agent 在本地移除过期凭证，Panel 失联也按已确认策略执行。**需要持续运行 Agent 的 `run` 模式；仅执行一次 `sync` 后退出不会执行后续定时检查，Xray 本身不识别本系统的绝对到期时间。**Agent 恢复时会先检查到期，再接触控制通道。
+
+额度以字节保存，留空/JSON `null` 表示不限，`0` 表示零；当前阶段只保存，不执行配额限制。批量创建最多 100 个，逐行显示成功或失败；也可勾选用户后批量切组、启停、设置到期/额度、轮换或删除。部分成功不会回滚已经完成的项目，重复提交轮换会再次生成秘密。
+
+管理 API 使用现有管理员会话；写操作还需要同源 `Origin` 和 `X-CSRF-Token`。机器 Bearer 凭据不能访问这些 API，未知 JSON 字段会拒绝。
+
+| 路径 | 操作与字段 |
+|---|---|
+| `/api/admin/groups/node`、`/api/admin/groups/user` | GET 列表，POST 创建；节点组提交 `name,node_ids`，用户组提交 `name,node_group_ids` |
+| `/api/admin/groups/{node或user}/{groupID}` | PUT 替换组及关系，DELETE 删除；删除保留稳定身份 |
+| `/api/admin/users` | GET 列表，POST 创建；字段为 `name,user_group_id,enabled,expires_at,quota_bytes` |
+| `/api/admin/users/{userID}` | GET 当前账户条件与有效节点；PUT 修改，DELETE 删除 |
+| `/api/admin/users/{userID}/rotate` | POST 独立轮换正式凭证 |
+| `/api/admin/users/batch/create` | POST `users` 数组，返回每项结果 |
+| `/api/admin/users/batch/change` | POST `operation,user_ids` 及对应字段；操作为 `move,enable,disable,expire,quota,rotate,delete` |
+
+API 的 `expires_at` 留空或使用带时区的 RFC3339 时间；页面转换为 UTC。批量结果的错误码区分名称冲突、对象不存在、字段无效和保存失败，页面显示中文说明。返回的账户有效节点反映当前授权目标，实际生效进度以机器的已应用版本和心跳为准。
 
 ## 验证
 

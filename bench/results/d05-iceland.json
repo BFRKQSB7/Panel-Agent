@@ -1,0 +1,73 @@
+{
+  "task": "D05",
+  "date_utc": "2026-10-23",
+  "host": "iceland-W8eRiY",
+  "passed": true,
+  "integration_smoke": {
+    "task": "D05",
+    "host": "iceland-W8eRiY",
+    "passed": true,
+    "checks": {
+      "real_core_fault_suite": "PASS",
+      "three_nodes_one_core": "PASS",
+      "unchanged_snapshot": "PASS",
+      "metadata_without_restart": "PASS",
+      "panel_offline_service": "PASS",
+      "agent_killed_before_health_offline_rollback": "PASS",
+      "formal_group_isolation": "PASS",
+      "new_node_group_membership": "PASS",
+      "group_change_and_rotation": "PASS",
+      "partial_batch_visible": "PASS",
+      "offline_expiry_and_restart": "PASS",
+      "master_key_missing_fail_closed": "PASS"
+    },
+    "resources": {
+      "system_samples": 23128,
+      "system_peak_bytes": 100782080,
+      "check_samples": 8,
+      "check_sampled_hwm_kib": 17388,
+      "run_samples": 17479,
+      "run_sampled_hwm_kib": 24052
+    },
+    "cleanup": "PASS"
+  },
+  "integration_binary_sha256": {
+    "d04-control": "32246a9a1d1ca45994b95115631571e63b53c2724ceaec10bfbecd43d275752b",
+    "d04-agent": "4c9e31efe9e8ed88f696f889ba36604684cf67d87a6a8bef10c8ebbf1f028921",
+    "d04-core-tests": "1f38999946a4b0f66dab9732c798ba4249e6d37ef7b2033bde0772fde6533abb",
+    "d04-http-target": "0a6cc4242daa5798057c904452ee0b458c0ba78811acc73922eb0f262429ee2a"
+  },
+  "additional_current_source_core_suite": {
+    "passed": true,
+    "binary_sha256": "4b84bc3fd8d98ff2c0a53bf495ef8d739f1b1193763d8e2ac4e244792f608302",
+    "cases": [
+      "TestLostCandidateRetainsIdentityAndExplicitGap",
+      "TestRealCoreExpiryWithoutPanelAndRecovery",
+      "TestRealCoreExpiryDuringUnreachablePanel",
+      "TestRealCoreApplyAndCrashRecovery",
+      "TestRealCoreFallbackDoesNotUndoRevocation"
+    ],
+    "cleanup": "PASS"
+  },
+  "regression": {
+    "d03_https_process_smoke": "PASS",
+    "d04_full_node_and_revocation_smoke": "PASS",
+    "targeted_go_packages": "PASS",
+    "full_release_regression": false
+  },
+  "environment": {
+    "os": "Alpine 3.23.4",
+    "architecture": "amd64",
+    "xray": "26.10.21",
+    "memory_limit_bytes": 134217728,
+    "swap_limit_bytes": 134217728,
+    "shared_host_kernel": true
+  },
+  "scope": "Formal UUIDs from the real HTTPS Panel/Agent path, isolated Reality listeners reached through SSH, actual HTTPS requests to example.com, plus current-source real Core recovery/deadline suites; no public NAT or release acceptance",
+  "limits": [
+    "Expiry scheduling requires Agent run to remain active; an exited one-shot sync is not a scheduler.",
+    "Quota fields are stored only until D10.",
+    "Resource values are sampled whole-container observations, not guaranteed instantaneous peaks.",
+    "The integration binary hashes and the later current-source Core-suite hash identify separate validation sets."
+  ]
+}

@@ -25,7 +25,7 @@
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit">生成新的随机 authority</button>
     </form>
-    <p class="muted">切换 authority 后，在线 Agent 会收到新的完整快照并完成一次性握手。未实现 Core 应用，机器状态不会显示为已应用。</p>
+    <p class="muted">切换 authority 后，在线 Agent 会收到完整快照并完成一次性握手。成功应用并通过健康检查后才更新已应用版本；未启用 Core 管理或应用失败时保留上次成功版本。</p>
     {{if not .Machines}}<p>还没有注册机器。</p>{{end}}
     {{range .Machines}}
     <article>

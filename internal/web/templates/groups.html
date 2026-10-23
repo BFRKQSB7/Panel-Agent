@@ -1,0 +1,16 @@
+{{define "group-fields"}}
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>组名称 <input name="name" value="{{.Group.Name}}" maxlength="128" required></label>
+<fieldset><legend>{{if eq .Kind "node"}}包含的节点{{else}}授权的节点组{{end}}</legend>
+{{range .Choices}}<label><input type="checkbox" name="{{if eq $.Kind "node"}}node_ids{{else}}node_group_ids{{end}}" value="{{.ID}}" {{if .Selected}}checked{{end}}> {{.Name}}</label>{{else}}<p>尚无可关联对象，请先创建节点或节点组。</p>{{end}}
+</fieldset><button type="submit">保存组与关系</button>
+{{end}}
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>用户组与节点组</title>
+<style>body{font:16px system-ui,sans-serif;max-width:64rem;margin:3rem auto;padding:0 1rem;color:#17202a}section,article{border:1px solid #9aa4ad;border-radius:.5rem;padding:1rem;margin:1rem 0}form{display:grid;gap:.8rem;margin:.7rem 0}input,button{font:inherit;padding:.5rem;border:1px solid #9aa4ad;border-radius:.3rem}fieldset label{display:block;margin:.4rem 0}button{background:#17202a;color:white;cursor:pointer}.danger{background:#8f2424}code{overflow-wrap:anywhere}</style></head>
+<body><main><h1>用户组与节点组</h1><nav><a href="/admin">设置</a> · <a href="/admin/machines">机器</a> · <a href="/admin/users">用户</a></nav>
+<p>每个用户只属于一个用户组，用户组可授权多个节点组。节点组可以重叠，最终节点与凭证会去重；新节点加入组后相关用户自动获得权限。</p>
+<section><h2>创建节点组</h2><form method="post" action="/admin/groups/node">{{template "group-fields" .NewNodeGroup}}</form></section>
+{{range .NodeGroups}}<article><h2>{{.Group.Name}} · 节点组</h2><code>{{.Group.GroupID}}</code><form method="post" action="/admin/groups/node/{{.Group.GroupID}}">{{template "group-fields" .}}</form><form method="post" action="/admin/groups/node/{{.Group.GroupID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">删除节点组</button></form></article>{{end}}
+<section><h2>创建用户组</h2><form method="post" action="/admin/groups/user">{{template "group-fields" .NewUserGroup}}</form></section>
+{{range .UserGroups}}<article><h2>{{.Group.Name}} · 用户组</h2><code>{{.Group.GroupID}}</code><form method="post" action="/admin/groups/user/{{.Group.GroupID}}">{{template "group-fields" .}}</form><form method="post" action="/admin/groups/user/{{.Group.GroupID}}/delete"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="danger">删除用户组</button></form></article>{{end}}
+<p>删除组会撤销通过它授予的权限，生效需等待相关 Agent 应用；现有连接会随完整 Core 重启中断。节点定义与历史用户身份仍保留。</p></main></body></html>

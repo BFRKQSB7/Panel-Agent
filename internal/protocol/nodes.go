@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"golang.org/x/net/idna"
@@ -96,6 +97,11 @@ func ValidateDesiredState(state DesiredState) error {
 		}
 		users, uuids := map[string]bool{}, map[string]bool{}
 		for _, credential := range node.Credentials {
+			if credential.ExpiresAt != "" {
+				if _, err := time.Parse(time.RFC3339, credential.ExpiresAt); err != nil {
+					return errors.New("凭证到期时间无效")
+				}
+			}
 			if !security.IsUUIDv4(credential.UUID) || uuids[credential.UUID] || !ValidText(credential.UserID, 128) || users[credential.UserID] || !ValidText(credential.Email, 128) || strings.Contains(credential.Email, ">") || emails[credential.Email] {
 				return fmt.Errorf("节点 %s 的凭证或统计身份无效", node.ID)
 			}

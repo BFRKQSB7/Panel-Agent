@@ -292,6 +292,10 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 			Reality:     protocol.RealityConfig{ServerName: node.ServerName, Target: node.Target, PrivateKey: string(private), PublicKey: node.PublicKey, ShortID: node.ShortID},
 			Credentials: []protocol.ProxyCredential{},
 		}
+		desired.Credentials, err = s.nodeCredentialsTx(ctx, tx, node.NodeID)
+		if err != nil {
+			return err
+		}
 		if node.Development {
 			uuid, err := s.readDevelopmentUUID(ctx, tx)
 			if err != nil {
@@ -307,6 +311,13 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 	digest, err := protocol.DigestDesiredState(state)
 	if err != nil {
 		return err
+	}
+	var previous string
+	if err := tx.QueryRowContext(ctx, "SELECT desired_digest FROM machines WHERE machine_id=?", machineID).Scan(&previous); err != nil {
+		return err
+	}
+	if previous == digest {
+		return nil
 	}
 	encoded, err := json.Marshal(state)
 	if err != nil {

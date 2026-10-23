@@ -324,11 +324,15 @@ func (s *Server) clearSessionCookies(w http.ResponseWriter) {
 }
 
 func readForm(w http.ResponseWriter, r *http.Request) (url.Values, error) {
+	return readFormWithLimit(w, r, maxFormBytes)
+}
+
+func readFormWithLimit(w http.ResponseWriter, r *http.Request, limit int64) (url.Values, error) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/x-www-form-urlencoded" {
 		return nil, errors.New("form content type required")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := r.ParseForm(); err != nil {
 		return nil, err
 	}

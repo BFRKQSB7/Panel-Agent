@@ -6,13 +6,16 @@ param(
     [Parameter(Mandatory)][string]$SshKnownHostsFile,
     [Parameter(Mandatory)][string]$ExpectedHostname,
     [Parameter(Mandatory)][string]$ExpectedIPv4,
-    [string]$PreparedRemoteDirectory = ''
+    [string]$PreparedRemoteDirectory = '',
+    [switch]$Authorization,
+    [switch]$CoreTestsOnly
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $work = Join-Path $PSScriptRoot '.work'
 $runId = [guid]::NewGuid().ToString('N')
-$local = Join-Path $work "d04-$runId"
+$task = if($Authorization){'D05'}else{'D04'}
+$local = Join-Path $work "$($task.ToLowerInvariant())-$runId"
 New-Item -ItemType Directory -Force -Path $local | Out-Null
 $remote = if ($PreparedRemoteDirectory) { $PreparedRemoteDirectory } else { "/tmp/panel-agent-d04-$runId" }
 if ($remote -notmatch '^/tmp/panel-agent-d04-[a-f0-9]{32}$' -or $ExpectedHostname -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid isolated directory or hostname.' }
@@ -21,7 +24,8 @@ $sshOptions = @('-F','NUL','-i',(Resolve-Path -LiteralPath $SshIdentityFile).Pat
 $processes = [Collections.Generic.List[object]]::new()
 $http = $null
 $prepared = $false
-$result = [ordered]@{ task='D04'; host=$ExpectedHostname; passed=$false; checks=[ordered]@{} }
+$result = [ordered]@{ task=$task; host=$ExpectedHostname; passed=$false; checks=[ordered]@{} }
+if($CoreTestsOnly){$result.core_tests_only=$true}
 
 function Remote([string]$Code, [switch]$AllowFailure) {
     $script = ("set -eu`n" + $Code).Replace("`r`n","`n")
@@ -90,14 +94,102 @@ function Sync-Agent([switch]$AllowFailure) {
     return Remote "'$remote/d04-agent' sync --data-dir '$remote/agent' --ca-cert '$remote/panel-cert.pem' --xray-path '$remote/xray' --development-loopback-test" -AllowFailure:$AllowFailure
 }
 function Node-Form($Node, [string]$Name=$Node.name, [int]$ListenPort=$Node.listen_port, [bool]$Enabled=$true) {
-    $values=@{ csrf=$script:adminCsrf; name=$Name; public_host=$Node.public_host; public_port=$Node.public_port; listen_host=$Node.listen_host; listen_port=$ListenPort; server_name=$Node.server_name; target=$Node.target; development='true' }
+    $values=@{ csrf=$script:adminCsrf; name=$Name; public_host=$Node.public_host; public_port=$Node.public_port; listen_host=$Node.listen_host; listen_port=$ListenPort; server_name=$Node.server_name; target=$Node.target }
+    if (-not $Authorization) { $values.development='true' }
     if ($Enabled) { $values.enabled='true' }
     $response=Request POST "/admin/machines/$script:machineID/nodes/$($Node.node_id)" (Form $values)
     if ($response.Status -ne 303 -or $response.Location -ne "/admin/machines/$script:machineID/nodes") { throw "Node form edit returned $($response.Status) or redirected outside its Node page." }
 }
-function Proxy-Get([int]$Port) {
-    $body=& curl.exe --fail --silent --show-error --max-time 15 --noproxy '' --proxy "socks5h://127.0.0.1:$Port" http://127.0.0.1:18080/
-    if ($LASTEXITCODE -ne 0 -or ($body -join '') -ne 'Panel-Agent-D01-OK') { throw "Reality request through SOCKS $Port failed." }
+function Proxy-Get([int]$Port,[switch]$Denied) {
+    $target=if($Authorization){'https://example.com/'}else{'http://127.0.0.1:18080/'}
+    if ($Denied) { & curl.exe --fail --silent --max-time 5 --noproxy '' --proxy "socks5h://127.0.0.1:$Port" $target > $null 2>&1; if($LASTEXITCODE -eq 0){throw "Unauthorized Reality request succeeded through $Port."}; return }
+    $body=& curl.exe --fail --silent --show-error --max-time 20 --noproxy '' --proxy "socks5h://127.0.0.1:$Port" $target
+    $valid=if($Authorization){($body -join '') -match 'Example Domain'}else{($body -join '') -eq 'Panel-Agent-D01-OK'}
+    if ($LASTEXITCODE -ne 0 -or -not $valid) { throw "Reality request through SOCKS $Port failed." }
+}
+
+function Domain-API([string]$Method,[string]$Path,$Body=$null) {
+    $req=[Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::new($Method),"https://127.0.0.1:28443$Path")
+    $req.Headers.ConnectionClose=$true
+    [void]$req.Headers.TryAddWithoutValidation('Origin','https://127.0.0.1:28443')
+    [void]$req.Headers.TryAddWithoutValidation('X-CSRF-Token',$adminCsrf)
+    if($null -ne $Body){$req.Content=[Net.Http.StringContent]::new(($Body|ConvertTo-Json -Depth 12),[Text.Encoding]::UTF8,'application/json')}
+    try{$res=$http.SendAsync($req).GetAwaiter().GetResult();try{$contents=$res.Content.ReadAsStringAsync().GetAwaiter().GetResult();if(-not $res.IsSuccessStatusCode){throw "Domain API returned HTTP $([int]$res.StatusCode)."};return ($contents|ConvertFrom-Json)}finally{$res.Dispose()}}finally{$req.Dispose()}
+}
+function Reload-Client {
+    Stop-Local $script:client
+    [IO.File]::WriteAllText("$local/client.json",($script:clientDocument|ConvertTo-Json -Depth 20))
+    $script:client=Start-Local (Join-Path $work 'windows/xray.exe') @('run','-config',"$local/client.json")
+    Start-Sleep -Milliseconds 500
+}
+function User-Body($User) { return @{name=$User.name;user_group_id=$User.user_group_id;enabled=$User.enabled;expires_at=$User.expires_at;quota_bytes=$User.quota_bytes} }
+function Test-AuthorizationChanges {
+    Proxy-Get 10811 -Denied; Proxy-Get 10812 -Denied; Proxy-Get 10810
+    $access=Domain-API GET "/api/admin/users/$($normalUser.user_id)"
+    if($access.nodes.Count -ne 2 -or $access.nodes.node_id -contains $nodes[2].node_id){throw 'Normal user visibility does not match group isolation.'}
+    $access=Domain-API GET "/api/admin/users/$($testUser.user_id)"
+    if($access.nodes.Count -ne 1 -or $access.nodes[0].node_id -ne $nodes[2].node_id){throw 'Test user visibility does not match isolated group.'}
+    $state=Core-State
+    if($state.current.mappings.Count -ne 3){throw 'Snapshot/Core permissions were not deduplicated.'}
+    $result.checks.formal_group_isolation='PASS'
+    [void](Domain-API PUT "/api/admin/groups/node/$($normalNodeGroup.group_id)" @{name='普通入口';node_ids=@($nodes.node_id)+@($nodes[1].node_id)})
+    [void](Sync-Agent)
+    Proxy-Get 10811
+    $access=Domain-API GET "/api/admin/users/$($normalUser.user_id)"
+    if($access.nodes.Count -ne 3 -or $access.user.credential_uuid -ne $normalUser.credential_uuid){throw 'Adding a Node did not automatically grant the existing credential.'}
+    $result.checks.new_node_group_membership='PASS'
+    [void](Domain-API PUT "/api/admin/groups/user/$($normalUserGroup.group_id)" @{name='普通用户组';node_group_ids=@($testNodeGroup.group_id)})
+    [void](Sync-Agent)
+    Proxy-Get 10808 -Denied; Proxy-Get 10811; Proxy-Get 10810
+    $access=Domain-API GET "/api/admin/users/$($normalUser.user_id)"
+    if($access.nodes.Count -ne 1 -or $access.nodes[0].node_id -ne $nodes[2].node_id){throw 'Group relation update did not change effective visibility.'}
+    [void](Domain-API PUT "/api/admin/groups/user/$($normalUserGroup.group_id)" @{name='普通用户组';node_group_ids=@($normalNodeGroup.group_id)})
+    [void](Sync-Agent)
+    $rotated=Domain-API POST "/api/admin/users/$($normalUser.user_id)/rotate"
+    [void](Sync-Agent)
+    if($rotated.credential_uuid -eq $normalUser.credential_uuid){throw 'Credential rotation reused the old UUID.'}
+    Proxy-Get 10808 -Denied
+    foreach($outbound in $script:clientDocument.outbounds){if($outbound.settings.vnext[0].users[0].id -eq $normalUser.credential_uuid){$outbound.settings.vnext[0].users[0].id=$rotated.credential_uuid}}
+    Reload-Client
+    Proxy-Get 10808;Proxy-Get 10809;Proxy-Get 10811
+    $result.checks.group_change_and_rotation='PASS'
+    $partial=Request POST '/admin/users/batch/create' (Form @{csrf=$adminCsrf;names="Bulk A`n普通正式用户`nBulk B";user_group_id=$testUserGroup.group_id})
+    if($partial.Status -ne 200 -or $partial.Body -notmatch 'name_conflict' -or $partial.Body -notmatch 'Bulk A' -or $partial.Body -notmatch 'Bulk B'){throw 'Partial batch result is not visible on the page.'}
+    $result.checks.partial_batch_visible='PASS'
+    $change=User-Body $rotated
+    $expiry=[DateTime]::UtcNow.AddSeconds(30)
+    $change.expires_at=$expiry.ToString("yyyy-MM-ddTHH:mm:ss'Z'")
+    [void](Domain-API PUT "/api/admin/users/$($normalUser.user_id)" $change)
+    [void](Sync-Agent)
+    $beforeExpiry=Core-State
+    [void](Remote "cd '$remote'; nohup '$remote/d04-agent' run --data-dir '$remote/agent' --ca-cert '$remote/panel-cert.pem' --xray-path '$remote/xray' --development-loopback-test > running-agent.log 2>&1 < /dev/null & echo `$! > '$remote/running-agent.pid'")
+    Stop-Owned 'panel.pid' "$remote/d04-control serve"
+    Proxy-Get 10808
+    $wait=[Math]::Max(0,($expiry-[DateTime]::UtcNow).TotalMilliseconds+3000)
+    Start-Sleep -Milliseconds ([int]$wait)
+    Proxy-Get 10808 -Denied;Proxy-Get 10810
+    $afterExpiry=Core-State
+    if($afterExpiry.core_generation -le $beforeExpiry.core_generation -or $afterExpiry.current.mappings.user_id -contains $normalUser.user_id){throw 'Offline Agent did not remove the expired formal credential.'}
+    Stop-Owned 'running-agent.pid' "$remote/d04-agent run"
+    $stopping=Core-State
+    $stoppingPID=[int]$stopping.process.pid
+    [void](Remote "test -r /proc/$stoppingPID/cmdline; tr '\000' ' ' < /proc/$stoppingPID/cmdline | grep -F '$remote/xray run -config $remote/agent/core/' >/dev/null; kill $stoppingPID")
+    [void](Sync-Agent -AllowFailure)
+    Proxy-Get 10808 -Denied;Proxy-Get 10810
+    $result.checks.offline_expiry_and_restart='PASS'
+    Start-Panel;Login-Admin
+    $access=Domain-API GET "/api/admin/users/$($normalUser.user_id)"
+    if($access.nodes.Count -ne 0 -or $access.unavailable_reasons -notcontains 'expired'){throw 'Expired user visibility disagrees with actual proxy denial.'}
+    Stop-Owned 'panel.pid' "$remote/d04-control serve"
+    [void](Remote "cd '$remote/panel'; mv master.key master.key.saved")
+    $missing=Remote "'$remote/d04-control' serve --data-dir '$remote/panel' --listen 127.0.0.1:28443" -AllowFailure
+    if($missing.Code -eq 0 -or $missing.Text -notmatch 'master.key' -or $missing.Text -notmatch '缺失'){throw 'Panel silently reset or ignored the missing master key.'}
+    [void](Remote "test ! -e '$remote/panel/master.key'; mv '$remote/panel/master.key.saved' '$remote/panel/master.key'")
+    Start-Panel;Login-Admin
+    $intact=Domain-API GET "/api/admin/users/$($testUser.user_id)"
+    if($intact.user.credential_uuid -ne $testUser.credential_uuid){throw 'Master-key recovery changed a formal credential.'}
+    $result.checks.master_key_missing_fail_closed='PASS'
+    Write-Output 'D05: formal permissions, rotation, partial batch, and offline expiry passed.'
 }
 function Wait-Probe([string]$Path, [bool]$Closed) {
     $deadline=[DateTime]::UtcNow.AddSeconds(15)
@@ -120,17 +212,20 @@ try {
     $env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
     Push-Location $repository
     try {
+        if(-not $CoreTestsOnly){
         & go build -o "$local/ssh-relay.exe" ./bench/ssh-relay
         if ($LASTEXITCODE -ne 0) { throw 'Relay build failed.' }
         & go build -o "$local/session-probe.exe" ./bench/session-probe
         if ($LASTEXITCODE -ne 0) { throw 'Session probe build failed.' }
+        }
         if (-not $PreparedRemoteDirectory) {
             $env:GOOS='linux'
             & go test -c -ldflags '-s -w' -o "$local/d04-core-tests" ./internal/agent
             if ($LASTEXITCODE -ne 0) { throw 'Linux test build failed.' }
-            foreach ($target in @(@('d04-control','./cmd/control'),@('d04-agent','./cmd/agent'),@('d04-http-target','./bench/http-target'))) {
+            if(-not $CoreTestsOnly){foreach ($target in @(@('d04-control','./cmd/control'),@('d04-agent','./cmd/agent'),@('d04-http-target','./bench/http-target'))) {
                 & go build -ldflags '-s -w' -o "$local/$($target[0])" $target[1]
                 if ($LASTEXITCODE -ne 0) { throw 'Linux binary build failed.' }
+            }
             }
         }
     } finally { Pop-Location }
@@ -142,7 +237,9 @@ try {
     if ($baseline -notmatch '^134217728') { throw 'Expected the authorized 128MiB test container.' }
     if (-not $PreparedRemoteDirectory) {
         [void](Remote "mkdir -m 700 '$remote'")
-        & tar.exe -czf "$local/bundle.tar.gz" -C $local d04-core-tests d04-control d04-agent d04-http-target
+        $bundleFiles=@('d04-core-tests')
+        if(-not $CoreTestsOnly){$bundleFiles+=@('d04-control','d04-agent','d04-http-target')}
+        & tar.exe -czf "$local/bundle.tar.gz" -C $local @bundleFiles
         if ($LASTEXITCODE -ne 0) { throw 'Benchmark bundle failed.' }
         Upload @("$local/bundle.tar.gz",$linuxArchive)
         [void](Remote "cd '$remote'; tar -xzf bundle.tar.gz")
@@ -170,10 +267,12 @@ nohup sh '__REMOTE__/monitor.sh' > resource.tsv 2>/dev/null < /dev/null &
 echo $! > monitor.pid
 '@
     [void](Remote $monitor.Replace('__REMOTE__',$remote))
-    $test=Remote "cd '$remote'; TMPDIR='$remote' PANEL_AGENT_TEST_XRAY='$remote/xray' ./d04-core-tests -test.run '^TestRealCoreApplyAndCrashRecovery$' -test.v -test.timeout 90s"
+    $pattern=if($CoreTestsOnly){'^Test(LostCandidateRetainsIdentityAndExplicitGap|RealCore.*)$'}elseif($Authorization){'^TestRealCore(ApplyAndCrashRecovery|ExpiryWithoutPanelAndRecovery|ExpiryDuringUnreachablePanel|FallbackDoesNotUndoRevocation)$'}else{'^TestRealCoreApplyAndCrashRecovery$'}
+    $test=Remote "cd '$remote'; TMPDIR='$remote' PANEL_AGENT_TEST_XRAY='$remote/xray' ./d04-core-tests -test.run '$pattern' -test.v -test.timeout 90s"
     [IO.File]::WriteAllText("$local/core-tests.txt",$test.Text)
     $result.checks.real_core_fault_suite='PASS'
     Write-Output 'D04: pinned real Core fault/recovery suite passed.'
+    if($CoreTestsOnly){$result.passed=$true;return}
 
     $password=[guid]::NewGuid().ToString('N')+'Aa7!'
     [void](Remote "printf '%s\n%s\n' '$password' '$password' | '$remote/d04-control' admin init --data-dir '$remote/panel' --password-stdin")
@@ -201,24 +300,40 @@ echo $! > monitor.pid
     $script:machineID=[regex]::Match($pair.Text,'[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}').Value
     if (-not $machineID) { throw 'Machine identity missing.' }
     foreach ($index in 0..2) {
-        $form=Form @{csrf=$adminCsrf;name="入口 $index";public_host='127.0.0.1';public_port=(45001+$index);listen_host='127.0.0.1';listen_port=(18443+$index);server_name='www.cloudflare.com';target='www.cloudflare.com:443';enabled='true';development='true'}
+        $values=@{csrf=$adminCsrf;name="入口 $index";public_host='127.0.0.1';public_port=(45001+$index);listen_host='127.0.0.1';listen_port=(18443+$index);server_name='www.cloudflare.com';target='www.cloudflare.com:443';enabled='true'}
+        if(-not $Authorization){$values.development='true'}
+        $form=Form $values
         if ((Request POST "/admin/machines/$machineID/nodes" $form).Status -ne 303) { throw 'Creating Node through its form failed.' }
+    }
+    $nodes=(Request GET "/api/admin/machines/$machineID/nodes").Body | ConvertFrom-Json
+    $nodes=@($nodes.nodes | Sort-Object listen_port)
+    if($Authorization){
+        $normalNodeGroup=Domain-API POST '/api/admin/groups/node' @{name='普通入口';node_ids=@($nodes[0].node_id,$nodes[1].node_id,$nodes[1].node_id)}
+        $testNodeGroup=Domain-API POST '/api/admin/groups/node' @{name='实验入口';node_ids=@($nodes[2].node_id)}
+        $overlapNodeGroup=Domain-API POST '/api/admin/groups/node' @{name='重复授权路径';node_ids=@($nodes[1].node_id)}
+        $normalUserGroup=Domain-API POST '/api/admin/groups/user' @{name='普通用户组';node_group_ids=@($normalNodeGroup.group_id,$overlapNodeGroup.group_id)}
+        $testUserGroup=Domain-API POST '/api/admin/groups/user' @{name='测试用户组';node_group_ids=@($testNodeGroup.group_id)}
+        $normalUser=Domain-API POST '/api/admin/users' @{name='普通正式用户';user_group_id=$normalUserGroup.group_id;enabled=$true;expires_at='';quota_bytes=0}
+        $testUser=Domain-API POST '/api/admin/users' @{name='测试正式用户';user_group_id=$testUserGroup.group_id;enabled=$true;expires_at='';quota_bytes=$null}
     }
     [void](Sync-Agent)
     $state=Core-State
     $page=Request GET "/admin/machines/$machineID/nodes"
-    if ($state.current.revision -ne 4 -or $page.Body -notmatch '已应用：4' -or $page.Body -match 'core_not_implemented') { throw 'Panel did not receive actual applied status.' }
-    $nodes=(Request GET "/api/admin/machines/$machineID/nodes").Body | ConvertFrom-Json
-    $nodes=@($nodes.nodes | Sort-Object listen_port)
-    if ($nodes.Count -ne 3 -or @($nodes.development_uuid | Select-Object -Unique).Count -ne 1) { throw 'Node credential isolation fixture is invalid.' }
+    $initialRevision=[uint64]$state.current.revision
+    if ($initialRevision -lt 4 -or $page.Body -notmatch "已应用：$initialRevision" -or $page.Body -match 'core_not_implemented') { throw 'Panel did not receive actual applied status.' }
+    if ($nodes.Count -ne 3 -or (-not $Authorization -and @($nodes.development_uuid | Select-Object -Unique).Count -ne 1)) { throw 'Node credential isolation fixture is invalid.' }
     $inbounds=@(); $outbounds=@(); $rules=@()
-    foreach ($index in 0..2) {
-        $node=$nodes[$index]; $tag="node-$index"
+    $clientCount=if($Authorization){5}else{3}
+    foreach ($index in 0..($clientCount-1)) {
+        $nodeIndex=if($index -eq 3){2}elseif($index -eq 4){0}else{$index}
+        $node=$nodes[$nodeIndex]; $tag="node-$index"
+        $uuid=if($Authorization){if($index -eq 2 -or $index -eq 4){$testUser.credential_uuid}else{$normalUser.credential_uuid}}else{$node.development_uuid}
         $inbounds+=@{listen='127.0.0.1';port=(10808+$index);tag=$tag;protocol='socks';settings=@{auth='noauth';udp=$true}}
-        $outbounds+=@{tag=$tag;protocol='vless';settings=@{vnext=@(@{address='127.0.0.1';port=$node.listen_port;users=@(@{id=$node.development_uuid;encryption='none'})})};streamSettings=@{network='raw';security='reality';realitySettings=@{serverName=$node.server_name;fingerprint='chrome';password=$node.public_key;shortId=$node.short_id;spiderX='/'}}}
+        $outbounds+=@{tag=$tag;protocol='vless';settings=@{vnext=@(@{address='127.0.0.1';port=$node.listen_port;users=@(@{id=$uuid;encryption='none'})})};streamSettings=@{network='raw';security='reality';realitySettings=@{serverName=$node.server_name;fingerprint='chrome';password=$node.public_key;shortId=$node.short_id;spiderX='/'}}}
         $rules+=@{type='field';inboundTag=@($tag);outboundTag=$tag}
     }
-    $clientConfig=@{log=@{loglevel='none'};inbounds=$inbounds;outbounds=$outbounds;routing=@{rules=$rules}} | ConvertTo-Json -Depth 20
+    $script:clientDocument=@{log=@{loglevel='none'};inbounds=$inbounds;outbounds=$outbounds;routing=@{rules=$rules}}
+    $clientConfig=$clientDocument | ConvertTo-Json -Depth 20
     [IO.File]::WriteAllText("$local/client.json",$clientConfig)
     $client=Start-Local (Join-Path $work 'windows/xray.exe') @('run','-config',"$local/client.json")
     Start-Sleep -Milliseconds 500
@@ -234,7 +349,7 @@ echo $! > monitor.pid
     Node-Form $nodes[2] '只改显示名称'
     [void](Sync-Agent)
     $metadata=Core-State
-    if ($metadata.process.pid -ne $firstPID -or $metadata.core_generation -ne $firstGeneration -or $metadata.current.revision -ne 5) { throw 'Metadata change restarted Core or failed to advance applied scope.' }
+    if ($metadata.process.pid -ne $firstPID -or $metadata.core_generation -ne $firstGeneration -or $metadata.current.revision -ne $initialRevision+1) { throw 'Metadata change restarted Core or failed to advance applied scope.' }
     $result.checks.metadata_without_restart='PASS'
     Stop-Owned 'panel.pid' "$remote/d04-control serve"
     $offline=Sync-Agent -AllowFailure
@@ -268,7 +383,7 @@ exit 1
     Stop-Owned 'panel.pid' "$remote/d04-control serve"
     $recovery=Sync-Agent -AllowFailure
     $recovered=Core-State
-    if ($recovery.Code -eq 0 -or $recovered.current.revision -ne 5 -or $recovered.candidate -or $recovered.phase -ne 'stable' -or -not $recovered.lkg) { throw 'Offline recovery adopted an unconfirmed candidate.' }
+    if ($recovery.Code -eq 0 -or $recovered.current.revision -ne $initialRevision+1 -or $recovered.candidate -or $recovered.phase -ne 'stable' -or -not $recovered.lkg) { throw 'Offline recovery adopted an unconfirmed candidate.' }
     foreach ($port in 10808..10810) { Proxy-Get $port }
     $result.checks.agent_killed_before_health_offline_rollback='PASS'
     Start-Panel
@@ -276,6 +391,7 @@ exit 1
     Node-Form $nodes[2] '恢复原入口' 18445
     [void](Sync-Agent)
 
+    if($Authorization){Test-AuthorizationChanges}else{
     $probeAFile="$local/session-a.json"; $probeBFile="$local/session-b.json"
     $probeA=Start-Local "$local/session-probe.exe" @('-socks','127.0.0.1:10808','-output',$probeAFile)
     $probeB=Start-Local "$local/session-probe.exe" @('-socks','127.0.0.1:10809','-output',$probeBFile)
@@ -299,6 +415,7 @@ exit 1
     $result.checks.revocation=[ordered]@{existing_tcp_closed=$afterA.tcp_closed;existing_udp_closed=$afterA.udp_closed;other_node_tcp_interrupted=$afterB.tcp_closed;other_nodes_reconnect=$true;old_mapping_retained=$true;boundary_count=$boundaries.Count;observed_uplink=$revokedCounters[-1].uplink;observed_downlink=$revokedCounters[-1].downlink;unobserved_tail_explicit=$true}
     $result.checks.panel_local_agent='PASS'
     Write-Output 'D04: three Nodes, offline rollback, and existing TCP/UDP revocation passed.'
+    }
     $result.passed=$true
 } finally {
     $index=0
@@ -317,7 +434,7 @@ exit 1
 cd '__REMOTE__'
 test "$(cat .owner)" = '__REMOTE__'
 touch monitor.stop
-for f in panel.pid target.pid monitor.pid crash-agent.pid; do
+for f in panel.pid target.pid monitor.pid crash-agent.pid running-agent.pid; do
   if test -f "$f"; then
     pid=$(cat "$f")
     if test -r /proc/$pid/cmdline; then
@@ -328,7 +445,7 @@ for f in panel.pid target.pid monitor.pid crash-agent.pid; do
 done
 for file in /proc/[0-9]*/cmdline; do
   args=$(tr '\000' ' ' 2>/dev/null < "$file" || true)
-  case "$args" in "__REMOTE__/xray run -config __REMOTE__/agent/core/"*) pid=${file#/proc/}; pid=${pid%/cmdline}; kill "$pid" 2>/dev/null || true;; esac
+  case "$args" in "__REMOTE__/xray run -config __REMOTE__/"*) pid=${file#/proc/}; pid=${pid%/cmdline}; kill "$pid" 2>/dev/null || true;; esac
 done
 sleep 0.3
 awk '$1=="mem"{n++;if($2>m)m=$2} $1=="check"{c++;if($2>cm)cm=$2} $1=="run"{r++;if($2>rm)rm=$2} END{printf "{\"system_samples\":%d,\"system_peak_bytes\":%d,\"check_samples\":%d,\"check_sampled_hwm_kib\":%d,\"run_samples\":%d,\"run_sampled_hwm_kib\":%d}",n,m,c,cm,r,rm}' resource.tsv
@@ -350,7 +467,7 @@ awk '$1=="mem"{n++;if($2>m)m=$2} $1=="check"{c++;if($2>cm)cm=$2} $1=="run"{r++;i
     }
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name,$oldEnv[$name],'Process') }
     $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath "$local/result.json" -Encoding utf8
-    Write-Output "D04 result: $local/result.json"
+    Write-Output "$task result: $local/result.json"
 }
 if (-not $result.passed) { throw 'D04 smoke did not pass.' }
 $result | ConvertTo-Json -Depth 12

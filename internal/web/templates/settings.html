@@ -13,7 +13,7 @@
 <body>
   <main>
     <h1>{{.SiteName}}</h1>
-    <p><a href="/admin/machines">机器管理</a></p>
+    <p><a href="/admin/machines">机器管理</a> · <a href="/admin/users">用户管理</a> · <a href="/admin/groups">用户组与节点组</a></p>
     {{if .Saved}}<p class="notice" role="status">设置已保存。</p>{{end}}
     {{if .Error}}<p role="alert">{{.Error}}</p>{{end}}
     <form method="post" action="/admin/settings">

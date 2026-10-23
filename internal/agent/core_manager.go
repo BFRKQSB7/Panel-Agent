@@ -29,6 +29,7 @@ type coreConfigRecord struct {
 	ConfigHash     string             `json:"config_hash"`
 	Mappings       []xray.StatMapping `json:"mappings"`
 	Listeners      []string           `json:"listeners"`
+	HasSource      bool               `json:"has_source,omitempty"`
 }
 
 type coreJournal struct {
@@ -44,6 +45,7 @@ type coreJournal struct {
 	LastError           string            `json:"last_error,omitempty"`
 	Boundary            string            `json:"pending_boundary,omitempty"`
 	DevelopmentLoopback bool              `json:"development_loopback_test"`
+	PermissionDigest    string            `json:"permission_digest,omitempty"`
 }
 
 type CoreApplyStatus struct {
@@ -152,6 +154,9 @@ func (m *CoreManager) load() error {
 	}
 	if state.Generation > 0 && !security.IsUUIDv4(state.InstanceID) {
 		return errors.New("Core journal has no valid generation identity")
+	}
+	if state.PermissionDigest != "" && !security.IsValidDigest(state.PermissionDigest) {
+		return errors.New("invalid confirmed permission source")
 	}
 	switch state.Phase {
 	case "stable", "validating", "prepared", "stopping", "starting", "checking", "restoring":
@@ -292,27 +297,48 @@ func (m *CoreManager) start(ctx context.Context, record *coreConfigRecord, phase
 
 func (m *CoreManager) restore(ctx context.Context) error {
 	var restored *coreConfigRecord
-	for _, record := range []*coreConfigRecord{m.state.Current, m.state.LKG} {
-		if record == nil || restored != nil && restored.ConfigHash == record.ConfigHash {
+	for index, original := range []*coreConfigRecord{m.state.Current, m.state.LKG} {
+		if original == nil || restored != nil && restored.ConfigHash == original.ConfigHash {
 			continue
 		}
-		restored = record
+		restored = original
+		isLKG := index == 1
+		record, err := m.recordAtPresent(original)
+		if err != nil {
+			continue
+		}
+		next := m.state
+		next.Candidate = record
+		next.Phase = "validating"
+		if err := m.save(next); err != nil {
+			return err
+		}
+		if err := m.testConfig(ctx, record); err != nil {
+			continue
+		}
 		process, err := m.start(ctx, record, "restoring")
 		if err == nil {
 			err = m.health(ctx, process, record, true)
 		}
 		if err != nil {
 			if process.PID != 0 {
+				if err := m.captureCandidate(ctx, process); err != nil {
+					return err
+				}
 				if stopErr := stopCoreProcess(ctx, process, m.binary); stopErr != nil {
 					return stopErr
+				}
+				if err := m.finishBoundary(m.state.Boundary, false); err != nil {
+					return err
 				}
 			}
 			continue
 		}
-		next := m.state
+		next = m.state
 		next.Current, next.Candidate, next.Phase = record, nil, "stable"
-		if record == m.state.LKG {
+		if isLKG {
 			next.LKG = record
+			next.LastError = protocol.ErrorCoreRecoveryFailed
 		}
 		return m.save(next)
 	}
@@ -334,7 +360,11 @@ func (m *CoreManager) recoverLocked(ctx context.Context) error {
 		return err
 	}
 	var current *coreProcess
+	candidateFound := false
 	for _, process := range processes {
+		if m.state.Candidate != nil && process.ConfigPath == m.configPath(m.state.Candidate) {
+			candidateFound = true
+		}
 		if m.state.Current != nil && process.ConfigPath == m.configPath(m.state.Current) && current == nil {
 			copy := process
 			current = &copy
@@ -349,6 +379,9 @@ func (m *CoreManager) recoverLocked(ctx context.Context) error {
 		if err := m.finishBoundary(m.state.Boundary, false); err != nil {
 			return err
 		}
+	}
+	if err := m.captureLostCandidate(ctx, candidateFound); err != nil {
+		return err
 	}
 	if m.state.Current == nil {
 		next := m.state
@@ -415,6 +448,10 @@ func (m *CoreManager) preflight(bindings []string) error {
 }
 
 func (m *CoreManager) Apply(ctx context.Context, epoch string, revision uint64, digest string, desired protocol.DesiredState) error {
+	return m.apply(ctx, epoch, revision, digest, desired, true)
+}
+
+func (m *CoreManager) apply(ctx context.Context, epoch string, revision uint64, digest string, desired protocol.DesiredState, confirmedPolicy bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.load(); err != nil {
@@ -427,16 +464,24 @@ func (m *CoreManager) Apply(ctx context.Context, epoch string, revision uint64, 
 	if err != nil || calculated != digest || !security.IsUUIDv4(epoch) || revision == 0 {
 		return m.fail(protocol.ErrorCoreConfigInvalid)
 	}
-	rendered, err := xray.RenderConfig(desired)
-	if m.developmentLoopback {
-		rendered, err = xray.RenderDevelopmentConfig(desired)
-	}
+	rendered, err := m.renderWithPermissionFloor(desired, !confirmedPolicy)
 	if err != nil || len(rendered.Bytes) > 1<<20 {
 		return m.fail(protocol.ErrorCoreConfigInvalid)
 	}
 	hash := sha256.Sum256(rendered.Bytes)
-	candidate := &coreConfigRecord{AuthorityEpoch: epoch, Revision: revision, Digest: digest, ConfigHash: hex.EncodeToString(hash[:]), Mappings: rendered.Mappings, Listeners: rendered.Listeners}
+	if err := m.persistDesired(digest, desired); err != nil {
+		return m.fail(protocol.ErrorCoreStorageFailed)
+	}
+	candidate := &coreConfigRecord{AuthorityEpoch: epoch, Revision: revision, Digest: digest, ConfigHash: hex.EncodeToString(hash[:]), Mappings: rendered.Mappings, Listeners: rendered.Listeners, HasSource: true}
 	if current := m.state.Current; current != nil && current.AuthorityEpoch == epoch && current.Revision == revision && current.Digest == digest && current.ConfigHash == candidate.ConfigHash {
+		if !current.HasSource || confirmedPolicy && m.state.PermissionDigest != digest {
+			next := m.state
+			next.Current = candidate
+			if confirmedPolicy {
+				next.PermissionDigest = digest
+			}
+			return m.save(next)
+		}
 		return nil
 	}
 	if _, err := os.Lstat(m.configPath(candidate)); errors.Is(err, os.ErrNotExist) {
@@ -451,11 +496,7 @@ func (m *CoreManager) Apply(ctx context.Context, epoch string, revision uint64, 
 	if err := m.save(next); err != nil {
 		return err
 	}
-	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
-	command := exec.CommandContext(checkContext, m.binary, "run", "-test", "-config", m.configPath(candidate))
-	err = command.Run()
-	cancel()
-	if err != nil {
+	if err := m.testConfig(ctx, candidate); err != nil {
 		return m.fail(protocol.ErrorCoreConfigInvalid)
 	}
 	if err := m.preflight(rendered.Bindings); err != nil {
@@ -469,6 +510,9 @@ func (m *CoreManager) Apply(ctx context.Context, epoch string, revision uint64, 
 	previous := m.state.Current
 	if previous != nil && previous.ConfigHash == candidate.ConfigHash {
 		next.Current, next.Candidate, next.Phase, next.LastError = candidate, nil, "stable", ""
+		if confirmedPolicy {
+			next.PermissionDigest = digest
+		}
 		if err := m.save(next); err != nil {
 			return err
 		}
@@ -500,6 +544,9 @@ func (m *CoreManager) Apply(ctx context.Context, epoch string, revision uint64, 
 	}
 	next = m.state
 	next.Current, next.LKG, next.Candidate, next.Phase, next.LastError = candidate, previous, nil, "stable", ""
+	if confirmedPolicy {
+		next.PermissionDigest = digest
+	}
 	if next.LKG == nil {
 		next.LKG = candidate
 	}
@@ -507,6 +554,15 @@ func (m *CoreManager) Apply(ctx context.Context, epoch string, revision uint64, 
 		return err
 	}
 	return m.prune()
+}
+
+func (m *CoreManager) testConfig(ctx context.Context, record *coreConfigRecord) error {
+	if err := m.verifyConfig(record); err != nil {
+		return err
+	}
+	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(checkContext, m.binary, "run", "-test", "-config", m.configPath(record)).Run()
 }
 
 func (m *CoreManager) rollback(ctx context.Context, code string) error {
@@ -518,7 +574,11 @@ func (m *CoreManager) rollback(ctx context.Context, code string) error {
 	if err != nil {
 		return err
 	}
+	candidateFound := false
 	for _, process := range processes {
+		if m.state.Candidate != nil && process.ConfigPath == m.configPath(m.state.Candidate) {
+			candidateFound = true
+		}
 		if err := m.captureCandidate(cleanup, process); err != nil {
 			return err
 		}
@@ -528,6 +588,9 @@ func (m *CoreManager) rollback(ctx context.Context, code string) error {
 		if err := m.finishBoundary(m.state.Boundary, false); err != nil {
 			return err
 		}
+	}
+	if err := m.captureLostCandidate(cleanup, candidateFound); err != nil {
+		return err
 	}
 	if m.state.Current != nil {
 		if err := m.restore(cleanup); err != nil {
@@ -568,9 +631,15 @@ func (m *CoreManager) Status() CoreApplyStatus {
 
 func (m *CoreManager) prune() error {
 	protected := map[string]bool{}
+	if m.state.PermissionDigest != "" {
+		protected[filepath.Base(m.desiredPath(m.state.PermissionDigest))] = true
+	}
 	for _, record := range []*coreConfigRecord{m.state.Current, m.state.LKG, m.state.Candidate} {
 		if record != nil {
 			protected[filepath.Base(m.configPath(record))] = true
+			if record.HasSource {
+				protected[filepath.Base(m.desiredPath(record.Digest))] = true
+			}
 		}
 	}
 	entries, err := os.ReadDir(m.dir)
@@ -581,13 +650,18 @@ func (m *CoreManager) prune() error {
 		name := entry.Name()
 		if strings.HasSuffix(name, ".tmp") && !entry.IsDir() {
 			base, token, ok := strings.Cut(strings.TrimSuffix(name, ".tmp"), ".json.")
-			if ok && security.IsValidToken(token, 16) && (base == "state" || strings.HasPrefix(base, "config-") && security.IsValidDigest(strings.TrimPrefix(base, "config-"))) {
+			if ok && security.IsValidToken(token, 16) && (base == "state" || strings.HasPrefix(base, "config-") && security.IsValidDigest(strings.TrimPrefix(base, "config-")) || strings.HasPrefix(base, "desired-") && security.IsValidDigest(strings.TrimPrefix(base, "desired-"))) {
 				if err := os.Remove(filepath.Join(m.dir, name)); err != nil {
 					return err
 				}
 			}
 		}
 		if strings.HasPrefix(name, "config-") && strings.HasSuffix(name, ".json") && security.IsValidDigest(strings.TrimSuffix(strings.TrimPrefix(name, "config-"), ".json")) && !protected[name] && !entry.IsDir() {
+			if err := os.Remove(filepath.Join(m.dir, name)); err != nil {
+				return err
+			}
+		}
+		if strings.HasPrefix(name, "desired-") && strings.HasSuffix(name, ".json") && security.IsValidDigest(strings.TrimSuffix(strings.TrimPrefix(name, "desired-"), ".json")) && !protected[name] && !entry.IsDir() {
 			if err := os.Remove(filepath.Join(m.dir, name)); err != nil {
 				return err
 			}

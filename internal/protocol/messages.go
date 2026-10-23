@@ -60,6 +60,7 @@ type ProxyCredential struct {
 	UUID        string `json:"uuid"`
 	Email       string `json:"email"`
 	Development bool   `json:"development"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
 }
 
 type DesiredState struct {
