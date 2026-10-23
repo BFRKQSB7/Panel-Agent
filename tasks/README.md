@@ -1,0 +1,64 @@
+# Panel-Agent 连续开发任务索引
+
+本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
+
+CURRENT MILESTONE: M1 — Core 与控制闭环  
+RECOMMENDED NEXT TASK: [D01 — Core 可行性原型](D01-core-feasibility.md)  
+DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
+DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
+
+| Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
+|---|---|---|---|---|---|
+| [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | READY | high | — | — |
+| [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | READY | high | — | — |
+| [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | WAITING | high | D02 | — |
+| [D04 — Reality 节点管理与单 Core 安全应用](D04-reality-apply-rollback.md) | M1 | WAITING | high | D01, D03 | — |
+| [D05 — 用户、组与实际代理权限](D05-users-groups-credentials.md) | M2 | WAITING | high | D04 | — |
+| [D06 — 双 Token、用户页与三类订阅](D06-dashboard-subscriptions.md) | M2 | WAITING | high | D05 | — |
+| [D07 — 独立周期规则与可执行边界样例](D07-period-policy-contract.md) | M3 | WAITING | high | D05 | — |
+| [D08 — Agent 持久采样、累计账本与重启恢复](D08-agent-durable-ledger.md) | M3 | WAITING | max | D07 | — |
+| [D09 — Panel 幂等入账与双端补报贯通](D09-panel-idempotent-ingest.md) | M3 | WAITING | max | D08 | — |
+| [D10 — 三维配额、限制状态与真实用量页面](D10-quotas-and-usage-ui.md) | M3 | WAITING | high | D06, D09 | — |
+| [D11 — 隐藏 Exit、一跳转发与扣账归属](D11-one-hop-exit.md) | M4 | WAITING | high | D10 | — |
+| [D12 — 动态 NAT/DNS 教程与有限连通性检查](D12-nat-dns-guidance.md) | M4 | WAITING | high | D06 | — |
+| [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md) | M4 | WAITING | high | D06 | — |
+| [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md) | M5 | WAITING | high | D04 | — |
+| [D15 — 手动 Core 升级与 CLI 更新回滚](D15-manual-upgrade-rollback.md) | M5 | WAITING | max | D16 | — |
+| [D16 — 一致性备份、恢复与 Agent 重连](D16-backup-restore-reconcile.md) | M5 | WAITING | max | D09, D13, D14 | — |
+| [D17 — 完整发布回归与资源验收](D17-release-resource-gate.md) | M5 | WAITING | high | D11, D12, D15 | — |
+
+M1 D01–D04：Core/后台/接入/节点；M2 D05–D06：用户与订阅；M3 D07–D10：周期/账本/入账/配额；M4 D11–D13：一跳/教程/扩展；M5 D14–D17：运维/发布。运维实际顺序为 D14→D16→D15→D17，先验证备份恢复再实现含 Schema 迁移的 Panel 更新，编号不代表依赖顺序。
+
+## 连续执行与状态维护
+
+- 状态取 WAITING、READY、IN_PROGRESS、DONE、PARTIAL、BLOCKED。依赖全部 DONE 才可执行；编号仅是默认选取顺序。D01 与 D02 无相互依赖，D01 缺测试环境时可继续 D02/D03，不得假装 D01 已通过来开始 D04。
+- 每次只执行一个任务，只读它、此索引及指定源码。开始核查一次实际基线；完成必要验证后更新该行状态和一条短验证摘要，刷新后继 READY 与下一项，自动继续。无需在每项完成后等待用户确认。
+- 优先继续未完成且可恢复的 IN_PROGRESS；否则取依赖满足、无真实 blocker 的最小编号任务。BLOCKED/PARTIAL 仅在前提变化后重试，不把它们当 DONE。只有相关分支阻塞时转做可独立执行的任务。
+- 同一失败两次修复无效后，先建立最小复现并定位根因；有新证据支持的不同方案可继续。只有缺少必要前提或没有安全可验证方案时记录 blocker，禁止重复盲试、跳过失败测试或降低验收。没有可执行项、用户叫停、预算/上下文无法安全继续时结束并报告。
+- 中断恢复先读索引与当前源码差异；DONE 表示必要验收有证据，不是模型自述。后续改动若破坏先前合同/验证，将受影响项改为 PARTIAL，并将依赖其有效性的后继置 WAITING；仅复验实际受影响范围，不能继续依赖失效的 DONE。上下文不足尽量在任务边界结束；任务中断保持 IN_PROGRESS/PARTIAL 与一行准确待办。
+- 日常只维护本索引；不创建 HANDOFF、STATE、Decision Log、每日记录或任务完成总结。静态契约确实变化才修订对应任务，不追加交接日志。每项不默认全量回归，D17 才集中发布验收。
+- 本轮规划未运行产品代码；真实 Linux/128MB/双架构/NAT 环境由对应任务检查。连续开发不授权购买资源、操作未指定生产机、自动并行 Agent、推送或公开发布。
+
+## 模型设置
+
+2026-10-22 核查官方文档：`deepseek-flash` 当前对应 V4.1-Flash-1017，思考档位为 `low/high/max`。第三方服务需确认实际映射；`xhigh` 在官方映射为 `high`，不能当作 `max`。默认启用思考，只对四项状态/恢复任务提高到 max，不自动换模型。
+
+这是本项目的任务设计判断，并非实测证明某模型可以无监督完成全部项目。首轮 D01–D04 后按失败类型和实际耗时校准范围，优先缩小当前问题，不重新扩成大任务。
+
+参考：[官方接入](https://api-docs.deepseek.com/quick_start/agent_integrations/)、[思考参数](https://api-docs.deepseek.com/guides/thinking_mode/)、[1017 更新](https://api-docs.deepseek.com/news/news261017)。
+
+## 交给 Coding Agent 的启动指令
+
+```text
+在 E:\project\Panel-Agent 连续开发。先读取 tasks/README.md，按照其状态和依赖，
+从推荐的可执行任务开始，一次完整处理一个任务：读取对应任务包及指定源码，
+实现、验证、更新唯一索引，然后自动继续下一项，不要每项完成后询问我。
+
+使用 DeepSeek V4.1 Flash，默认 high；D08/D09/D15/D16 用 max。
+若工具不能调整档位，不虚构已切换；按可用档位工作并在相关高风险任务说明限制。
+只执行本套 D01–D17，不恢复旧任务或重新拆分全项目。
+保留全部 V1 要求，遇到阻塞按索引规则转做无依赖任务或准确停止。
+不以提供测试脚本代替实际通过，不伪造资源指标，不新增交接/状态文档。
+在本轮无法继续时，按当前任务末尾的结果格式汇报。
+```
+
