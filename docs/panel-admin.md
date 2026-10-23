@@ -32,6 +32,24 @@ go run ./cmd/control serve --data-dir C:\panel\data --listen 127.0.0.1:8080
 
 服务会使用 HttpOnly、SameSite Strict Cookie、CSRF token、同源 Origin 检查、限流和安全响应头。数据目录包含 `panel.db` 与 `master.key`，应一起纳入受限权限的备份；如果数据库仍在而密钥缺失，服务会拒绝启动且不会生成替代密钥。当前实现默认单个 Panel 写进程，并使用进程锁阻止并发启动。
 
+## Agent 配对与控制通道
+
+管理员登录后打开“机器管理”，签发一次性 Join Token，并在 30 分钟内将它安全地传到目标机器。Agent 只主动连接 Panel 的 HTTPS 地址；若使用自签证书或私有 CA，把签发证书保存到 Agent 主机并用 `--ca-cert` 指定，公有可信证书不需要该参数。不要把 Join Token 放进命令行参数、环境变量或日志，下面的示例通过标准输入传递：
+
+```powershell
+$panelUrl = 'https://panel.example.com'
+$joinToken = Read-Host '粘贴一次性 Join Token'
+$joinToken | .\control-agent.exe pair --panel-url $panelUrl --data-dir C:\panel-agent\data --name '边缘机器 1' --join-token-stdin
+```
+
+配对会在本地持久保存机器身份，然后立即拉取并校验完整 desired-state 快照。若注册已提交但连接中断，使用相同数据目录再次执行 `pair` 会凭本地候选密钥安全恢复结果；不要删除或复制 `agent.identity.json`，它包含机器凭据，必须限制为 Agent 服务账户可读。确认配对成功后，可以前台方式持续同步，Ctrl+C 安全退出：
+
+```powershell
+.\control-agent.exe run --data-dir C:\panel-agent\data
+```
+
+`run` 成功后每 30～35 秒同步一次，失败时指数退避并加入抖动，恢复连接后自动继续。`sync` 可手动执行单次同步。重新配对时，先在机器管理页面为目标机器签发专用凭据，再在同一 Agent 数据目录执行 `re-pair`；它保留机器 ID 并轮换认证密钥。吊销会立即拒绝该机器的后续 API 请求，但不会远程停止机器上的进程。当前没有 Core 应用实现，Agent 只报告快照已接收，不会报告 applied 成功。
+
 ## 验证
 
 ```powershell

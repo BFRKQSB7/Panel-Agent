@@ -6,15 +6,20 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
+	"panel-agent.local/panel-agent/internal/protocol"
+	"panel-agent.local/panel-agent/internal/security"
 )
 
 //go:embed migrations/*.sql
@@ -61,7 +66,12 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	if err := store.ensurePanelAuthority(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 func applyMigrations(ctx context.Context, db *sql.DB) error {
@@ -72,32 +82,97 @@ func applyMigrations(ctx context.Context, db *sql.DB) error {
 	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&current); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if current > 1 {
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		return fmt.Errorf("list schema migrations: %w", err)
+	}
+	type migrationFile struct {
+		version int
+		name    string
+	}
+	var migrations []migrationFile
+	versions := make(map[int]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		prefix, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok {
+			return fmt.Errorf("invalid migration filename %q", entry.Name())
+		}
+		version, err := strconv.Atoi(prefix)
+		if err != nil || version < 1 {
+			return fmt.Errorf("invalid migration version in %q", entry.Name())
+		}
+		if _, exists := versions[version]; exists {
+			return fmt.Errorf("duplicate schema migration version %d", version)
+		}
+		versions[version] = struct{}{}
+		migrations = append(migrations, migrationFile{version: version, name: entry.Name()})
+	}
+	sort.Slice(migrations, func(i, j int) bool { return migrations[i].version < migrations[j].version })
+	if len(migrations) == 0 {
+		return errors.New("no schema migrations were embedded")
+	}
+	if current > migrations[len(migrations)-1].version {
 		return fmt.Errorf("database schema version %d is newer than this Panel supports", current)
 	}
-	if current == 1 {
+	for _, migration := range migrations {
+		if migration.version <= current {
+			continue
+		}
+		if migration.version != current+1 {
+			return fmt.Errorf("schema migration %d is missing", current+1)
+		}
+		contents, err := migrationFiles.ReadFile(filepath.ToSlash(filepath.Join("migrations", migration.name)))
+		if err != nil {
+			return fmt.Errorf("read schema migration %d: %w", migration.version, err)
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin schema migration %d: %w", migration.version, err)
+		}
+		for _, statement := range splitSQLStatements(string(contents)) {
+			if _, err := tx.ExecContext(ctx, statement); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("apply schema migration %d: %w", migration.version, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)", migration.version, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("record schema migration %d: %w", migration.version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit schema migration %d: %w", migration.version, err)
+		}
+		current = migration.version
+	}
+	return nil
+}
+
+func (s *Store) ensurePanelAuthority(ctx context.Context) error {
+	var count int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM panel_authority WHERE id = 1").Scan(&count); err != nil {
+		return fmt.Errorf("read Panel authority: %w", err)
+	}
+	if count == 1 {
 		return nil
 	}
-	migration, err := migrationFiles.ReadFile("migrations/0001_initial.sql")
+	state := protocol.EmptyDesiredState()
+	digest, err := protocol.DigestDesiredState(state)
 	if err != nil {
-		return fmt.Errorf("read initial migration: %w", err)
+		return fmt.Errorf("digest initial desired state: %w", err)
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	authority, err := security.NewUUID()
 	if err != nil {
-		return fmt.Errorf("begin schema migration: %w", err)
+		return err
 	}
-	for _, statement := range splitSQLStatements(string(migration)) {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("apply schema migration: %w", err)
-		}
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode initial desired state: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations(version, applied_at) VALUES(1, ?)", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("record schema migration: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schema migration: %w", err)
+	if _, err := s.db.ExecContext(ctx, "INSERT INTO panel_authority(id, authority_epoch, revision, digest, snapshot_json, updated_at) VALUES(1, ?, 1, ?, ?, ?)", authority, digest, string(stateJSON), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("persist Panel authority: %w", err)
 	}
 	return nil
 }

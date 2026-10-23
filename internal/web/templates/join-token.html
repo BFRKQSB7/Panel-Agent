@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>一次性接入凭据</title>
+  <style>
+    body{font:16px system-ui,sans-serif;max-width:44rem;margin:10vh auto;padding:0 1rem;color:#17202a}
+    code{display:block;padding:1rem;background:#f0f2f4;border-radius:.4rem;overflow-wrap:anywhere}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>一次性接入凭据</h1>
+    <p>此凭据仅显示一次，30 分钟后过期，注册成功后立即失效。请通过受信任的安全通道交给目标机器管理员。</p>
+    {{if .TargetMachineID}}<p>重新配对机器：<code>{{.TargetMachineID}}</code></p>{{else}}<p>用途：注册一台新机器。</p>{{end}}
+    <p>Join Token：</p>
+    <code>{{.JoinToken}}</code>
+    <p>过期时间：{{.ExpiresAt}}</p>
+    <p>目标机器执行 `control-agent pair --panel-url https://panel.example --data-dir ./agent-data`，随后在隐藏提示中输入该凭据。不要把 token 放进命令参数或日志。</p>
+    <p><a href="/admin/machines">返回机器管理</a></p>
+  </main>
+</body>
+</html>

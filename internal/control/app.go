@@ -128,7 +128,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/admin", s.handleAdmin)
 	mux.HandleFunc("/admin/settings", s.handleSettingsForm)
+	mux.HandleFunc("GET /admin/machines", s.handleMachinesPage)
+	mux.HandleFunc("POST /admin/join-tokens", s.handleCreateJoinToken)
+	mux.HandleFunc("POST /admin/machines/{machineID}/details", s.handleMachineDetails)
+	mux.HandleFunc("POST /admin/machines/{machineID}/revoke", s.handleMachineRevoke)
+	mux.HandleFunc("POST /admin/machines/{machineID}/re-pair-token", s.handleMachineRepairToken)
+	mux.HandleFunc("POST /admin/authority/rotate", s.handleAuthorityRotate)
 	mux.HandleFunc("/api/settings", s.handleSettingsAPI)
+	mux.HandleFunc("POST /api/v1/machines/register", s.handleMachineRegister)
+	mux.HandleFunc("POST /api/v1/machines/recover", s.handleMachineRecovery)
+	mux.HandleFunc("POST /api/v1/agent/desired-state", s.handleDesiredState)
+	mux.HandleFunc("POST /api/v1/agent/status", s.handleMachineStatus)
 	return s.securityHeaders(mux)
 }
 
