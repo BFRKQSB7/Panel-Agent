@@ -26,6 +26,7 @@ type Server struct {
 	sessions    *sessionManager
 	limiter     *loginLimiter
 	templates   *template.Template
+	actions     *security.ActionSigner
 }
 
 func NewServer(config Config) (*Server, error) {
@@ -41,10 +42,12 @@ func NewServer(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := security.LoadOrCreateMasterKey(dataDir, filepath.Join(dataDir, storage.DatabaseFileName)); err != nil {
+	master, err := security.LoadOrCreateMasterKey(dataDir, filepath.Join(dataDir, storage.DatabaseFileName))
+	if err != nil {
 		_ = processLock.Close()
 		return nil, err
 	}
+	defer clear(master)
 	store, err := storage.Open(dataDir)
 	if err != nil {
 		_ = processLock.Close()
@@ -67,6 +70,12 @@ func NewServer(config Config) (*Server, error) {
 		_ = processLock.Close()
 		return nil, fmt.Errorf("load embedded web templates: %w", err)
 	}
+	actions, err := security.NewActionSigner(master)
+	if err != nil {
+		_ = store.Close()
+		_ = processLock.Close()
+		return nil, err
+	}
 	return &Server{
 		config:      config,
 		tlsConfig:   tlsConfig,
@@ -75,6 +84,7 @@ func NewServer(config Config) (*Server, error) {
 		sessions:    newSessionManager(),
 		limiter:     newLoginLimiter(),
 		templates:   templates,
+		actions:     actions,
 	}, nil
 }
 
@@ -111,6 +121,9 @@ func (s *Server) Close() error {
 		return nil
 	}
 	var storeErr, lockErr error
+	if s.actions != nil {
+		s.actions.Close()
+	}
 	if s.store != nil {
 		storeErr = s.store.Close()
 	}
@@ -162,12 +175,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/admin/users/{userID}", s.handleUsersAPI)
 	mux.HandleFunc("POST /api/admin/users/{userID}/{action}", s.handleUsersAPI)
 	mux.HandleFunc("POST /api/admin/users/batch/{batch}", s.handleUsersAPI)
+	mux.HandleFunc("GET /admin/user-links", s.handleUserLinksPage)
+	mux.HandleFunc("POST /admin/user-links", s.handleUserLinksForm)
+	mux.HandleFunc("GET /api/admin/user-tokens/action", s.handleTokenActionAPI)
+	mux.HandleFunc("POST /api/admin/user-tokens/batch", s.handleTokenBatchAPI)
+	mux.HandleFunc("GET /u/{token}", s.handleDashboard)
+	mux.HandleFunc("POST /u/{token}/subscription/reset", s.handleSubscriptionReset)
+	mux.HandleFunc("GET /s/{token}/{format}", s.handleSubscription)
+	mux.HandleFunc("GET /assets/tokens.js", s.handleTokenScript)
 	mux.HandleFunc("/api/settings", s.handleSettingsAPI)
 	mux.HandleFunc("POST /api/v1/machines/register", s.handleMachineRegister)
 	mux.HandleFunc("POST /api/v1/machines/recover", s.handleMachineRecovery)
 	mux.HandleFunc("POST /api/v1/agent/desired-state", s.handleDesiredState)
 	mux.HandleFunc("POST /api/v1/agent/status", s.handleMachineStatus)
-	return s.securityHeaders(mux)
+	return s.securityHeaders(accessLog(mux))
 }
 
 func (s *Server) Serve(ctx context.Context) error {

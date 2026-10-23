@@ -261,6 +261,13 @@ func (s *Server) csrfValid(r *http.Request, cookieToken, submitted string) bool 
 	if cookieToken == "" || submitted == "" || subtle.ConstantTimeCompare([]byte(cookieToken), []byte(submitted)) != 1 {
 		return false
 	}
+	return s.sameOrigin(r)
+}
+
+func (s *Server) sameOrigin(r *http.Request) bool {
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return false
+	}
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
@@ -286,9 +293,9 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Cache-Control", "private, no-store")
 		if s.requestScheme(r) == "https" {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}

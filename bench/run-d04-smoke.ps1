@@ -8,13 +8,14 @@ param(
     [Parameter(Mandatory)][string]$ExpectedIPv4,
     [string]$PreparedRemoteDirectory = '',
     [switch]$Authorization,
-    [switch]$CoreTestsOnly
+    [switch]$CoreTestsOnly,
+    [switch]$ClientCompatibilityOnly
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $work = Join-Path $PSScriptRoot '.work'
 $runId = [guid]::NewGuid().ToString('N')
-$task = if($Authorization){'D05'}else{'D04'}
+$task = if($ClientCompatibilityOnly){'D06'}elseif($Authorization){'D05'}else{'D04'}
 $local = Join-Path $work "$($task.ToLowerInvariant())-$runId"
 New-Item -ItemType Directory -Force -Path $local | Out-Null
 $remote = if ($PreparedRemoteDirectory) { $PreparedRemoteDirectory } else { "/tmp/panel-agent-d04-$runId" }
@@ -123,6 +124,42 @@ function Reload-Client {
     Start-Sleep -Milliseconds 500
 }
 function User-Body($User) { return @{name=$User.name;user_group_id=$User.user_group_id;enabled=$User.enabled;expires_at=$User.expires_at;quota_bytes=$User.quota_bytes} }
+function Test-NativeClientCompatibility {
+    Stop-Local $script:client
+    $node=$nodes[0]
+    $mihomo=Get-ChildItem -LiteralPath (Join-Path $work 'clients/mihomo-1.19.33') -Filter '*.exe' | Select-Object -First 1
+    $singbox=Get-ChildItem -LiteralPath (Join-Path $work 'clients/sing-box-1.14.3') -Recurse -Filter 'sing-box.exe' | Select-Object -First 1
+    if(-not $mihomo -or -not $singbox){throw 'Pinned native client cache is missing.'}
+    $profiles=@(
+        @{name='mihomo';binary=$mihomo.FullName;config=@{'mixed-port'=10808;'allow-lan'=$false;mode='rule';'log-level'='debug';proxies=@(@{name='COMPAT';type='vless';server='127.0.0.1';port=$node.listen_port;uuid=$normalUser.credential_uuid;udp=$true;tls=$true;network='tcp';servername=$node.server_name;'client-fingerprint'='chrome';'reality-opts'=@{'public-key'=$node.public_key;'short-id'=$node.short_id}});rules=@('MATCH,COMPAT')}}
+        @{name='sing-box';binary=$singbox.FullName;config=@{log=@{level='debug'};inbounds=@(@{type='socks';tag='socks-in';listen='127.0.0.1';listen_port=10808});outbounds=@(@{type='vless';tag='proxy';server='127.0.0.1';server_port=$node.listen_port;uuid=$normalUser.credential_uuid;tls=@{enabled=$true;server_name=$node.server_name;utls=@{enabled=$true;fingerprint='chrome'};reality=@{enabled=$true;public_key=$node.public_key;short_id=$node.short_id}}});route=@{final='proxy'}}}
+    )
+    $pq=$profiles[0].config|ConvertTo-Json -Depth 15|ConvertFrom-Json -AsHashtable
+    $pq.proxies[0]['reality-opts']['support-x25519mlkem768']=$true
+    $profiles=@($profiles[0],@{name='mihomo-mlkem';binary=$mihomo.FullName;config=$pq},$profiles[1])
+    $results=[ordered]@{}
+    foreach($profile in $profiles){
+        $dir=Join-Path $local $profile.name;New-Item -ItemType Directory -Path $dir | Out-Null
+        $path=Join-Path $dir 'config.json';[IO.File]::WriteAllText($path,($profile.config|ConvertTo-Json -Depth 15))
+        $checkArgs=if($profile.name.StartsWith('mihomo')){@('-t','-d',$dir,'-f',$path)}else{@('check','-c',$path)}
+        $check=Start-Local $profile.binary $checkArgs
+        if(-not $check.Process.WaitForExit(15000)){Stop-Local $check;throw 'Native config check timed out.'}
+        $valid=$check.Process.ExitCode -eq 0
+        $connected=$false
+        if($valid){
+            $runArgs=if($profile.name.StartsWith('mihomo')){@('-d',$dir,'-f',$path)}else{@('run','-c',$path)}
+            $entry=Start-Local $profile.binary $runArgs
+            Start-Sleep -Milliseconds 700
+            try{Proxy-Get 10808;$connected=$true}catch{}
+            Stop-Local $entry
+        }
+        $results[$profile.name]=[ordered]@{configuration_check=$valid;reality_proxy_connected=$connected}
+    }
+    $result.checks.native_client_compatibility=$results
+    $result.compatibility=[ordered]@{server='Xray 26.10.21';mihomo='1.19.33';sing_box='1.14.3';control_xray_client_connected=$true}
+    $result.passed=($results.mihomo.reality_proxy_connected -or $results.'mihomo-mlkem'.reality_proxy_connected) -and $results.'sing-box'.configuration_check -and $results.'sing-box'.reality_proxy_connected
+    Write-Output ($results|ConvertTo-Json -Depth 4)
+}
 function Test-AuthorizationChanges {
     Proxy-Get 10811 -Denied; Proxy-Get 10812 -Denied; Proxy-Get 10810
     $access=Domain-API GET "/api/admin/users/$($normalUser.user_id)"
@@ -268,10 +305,12 @@ echo $! > monitor.pid
 '@
     [void](Remote $monitor.Replace('__REMOTE__',$remote))
     $pattern=if($CoreTestsOnly){'^Test(LostCandidateRetainsIdentityAndExplicitGap|RealCore.*)$'}elseif($Authorization){'^TestRealCore(ApplyAndCrashRecovery|ExpiryWithoutPanelAndRecovery|ExpiryDuringUnreachablePanel|FallbackDoesNotUndoRevocation)$'}else{'^TestRealCoreApplyAndCrashRecovery$'}
+    if(-not $ClientCompatibilityOnly){
     $test=Remote "cd '$remote'; TMPDIR='$remote' PANEL_AGENT_TEST_XRAY='$remote/xray' ./d04-core-tests -test.run '$pattern' -test.v -test.timeout 90s"
     [IO.File]::WriteAllText("$local/core-tests.txt",$test.Text)
     $result.checks.real_core_fault_suite='PASS'
     Write-Output 'D04: pinned real Core fault/recovery suite passed.'
+    }
     if($CoreTestsOnly){$result.passed=$true;return}
 
     $password=[guid]::NewGuid().ToString('N')+'Aa7!'
@@ -338,6 +377,7 @@ echo $! > monitor.pid
     $client=Start-Local (Join-Path $work 'windows/xray.exe') @('run','-config',"$local/client.json")
     Start-Sleep -Milliseconds 500
     foreach ($port in 10808..10810) { Proxy-Get $port }
+    if($ClientCompatibilityOnly){Test-NativeClientCompatibility;if(-not $result.passed){throw 'Pinned native client interoperability failed.'};return}
     $count=(Remote "for p in /proc/[0-9]*/cmdline; do tr '\000' ' ' 2>/dev/null < `$p | grep -F '$remote/xray run -config $remote/agent/core/' || true; done").Text.Split("`n",[StringSplitOptions]::RemoveEmptyEntries).Count
     if ($count -ne 1) { throw "Expected one managed Core, observed $count." }
     $result.checks.three_nodes_one_core='PASS'

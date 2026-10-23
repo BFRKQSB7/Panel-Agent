@@ -14,7 +14,7 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |
 | [D04 — Reality 节点管理与单 Core 安全应用](D04-reality-apply-rollback.md) | M1 | DONE | high | D01, D03 | Node 表单/隔离快照/加密密钥、串行应用与持久恢复完成；玩具冰岛三入口单 Core、故障回滚、离线恢复、已有 TCP/UDP 撤销通过；整机采样峰值 98.6MiB、OOM 零，原服务保留；D03 回归通过。 |
 | [D05 — 用户、组与实际代理权限](D05-users-groups-credentials.md) | M2 | DONE | high | D04 | 用户/组/加密正式凭证与批量操作完成；冰岛真实代理隔离、加组授权、轮换、常驻 Agent 离线到期/恢复、缺 key 拒绝通过；当前源码真实 Core 验证 LKG 不恢复已撤销权限及挂起请求到期；D03/D04 回归通过。 |
-| [D06 — 双 Token、用户页与三类订阅](D06-dashboard-subscriptions.md) | M2 | READY | high | D05 | — |
+| [D06 — 双 Token、用户页与三类订阅](D06-dashboard-subscriptions.md) | M2 | IN_PROGRESS | high | D05 | 用户要求暂停，已保存双 Token/hash/幂等交付、Dashboard、URI/Mihomo 初版；相关 Go 测试通过，新增 HTTP/浏览器及产品导出 smoke 待验。冰岛实测 Xray 与开启 MLKEM 的 Mihomo 可连接，sing-box Reality 失败；用户同意保留固定 Core 并禁用该导出，恢复后需同步静态验收范围和诊断脚本口径。 |
 | [D07 — 独立周期规则与可执行边界样例](D07-period-policy-contract.md) | M3 | READY | high | D05 | — |
 | [D08 — Agent 持久采样、累计账本与重启恢复](D08-agent-durable-ledger.md) | M3 | WAITING | max | D07 | — |
 | [D09 — Panel 幂等入账与双端补报贯通](D09-panel-idempotent-ingest.md) | M3 | WAITING | max | D08 | — |
