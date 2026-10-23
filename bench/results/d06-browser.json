@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": [
+    "one-time delivery",
+    "fresh browser isolation",
+    "explicit reset",
+    "old URL invalid",
+    "cache generation and TTL",
+    "forget",
+    "no third-party requests or Referer"
+  ],
+  "browser": "Chromium via Playwright",
+  "fixture": "isolated loopback Panel, no proxy Core",
+  "full_release_regression": false
+}

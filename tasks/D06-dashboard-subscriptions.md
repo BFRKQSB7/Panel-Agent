@@ -6,11 +6,11 @@ STATUS: 只在 [任务索引](README.md) 维护，本文件为静态任务包。
 
 ## GOAL
 
-让用户凭私有链接查看授权节点，导入 URI/Mihomo/sing-box 并使用正确客户端分流。
+让用户凭私有链接查看授权节点，导入经过互通验收的 URI/Mihomo 配置并使用正确客户端分流；对 sing-box Reality 明确报告不支持。
 
 ## USER VALUE
 
-本任务的可观察结果是：让用户凭私有链接查看授权节点，导入 URI/Mihomo/sing-box 并使用正确客户端分流。 后续任务直接使用代码、类型与验证结果，不依赖会话记忆。
+本任务的可观察结果是：让用户凭私有链接查看授权节点，导入 URI/Mihomo 并使用正确客户端分流，避免导出已知无法互通的 sing-box Reality 配置。后续任务直接使用代码、类型与验证结果，不依赖会话记忆。
 
 ## WHY NOW
 
@@ -85,6 +85,7 @@ D05 有用户授权与加密 Credential，可实际代理；额度字段未执�
 - 订阅 Token 重置只吊销 URL，不轮换已缓存协议 Credential；用户不能写额度/组/到期。
 - 敏感 URL 不入日志/Referer/公共缓存；无第三方追踪；自定义 Token 拒弱值/冲突。
 - 客户端支持以官方格式和实际检查为准；不支持 Renderer 的组合明确排除，不生成假字段。
+- 用户已确认保留固定 Xray 26.10.21，禁用 sing-box 1.14.3 Reality 导出：该组合实测验证失败。Mihomo 1.19.33 必须设置 `support-x25519mlkem768: true`；URI 按 Xray 客户端验收，不承诺任意客户端互通。sing-box 入口返回明确的不支持错误，不生成空壳配置；后续新增组合需单独实测后启用。
 
 - 订阅必须包含该用户客户端连接所需的 UUID/密码及 Reality 公钥，但绝不包含服务器私钥、别的用户秘密或 Machine/Transit Token；测试不得把合法连接凭证一概删掉。
 - 批量创建/重置的明文 Token 仅一次性安全交付并报告逐项失败；订阅重置为鉴权 POST 且有 CSRF/来源防护，GET 链接不可触发写操作。敏感路径在访问日志入口就脱敏。
@@ -94,7 +95,7 @@ D05 有用户授权与加密 Credential，可实际代理；额度字段未执�
 ## IN SCOPE
 
 - 贯通双 Token 生命周期、管理员操作与私有 Dashboard；流量区域明确尚未启用。
-- 实现 Reality 的三类 Renderer 与导入预设，设置统一客户端路由模板。
+- 实现 Reality 的 URI/Mihomo Renderer 与导入预设、客户端路由模板；sing-box Reality 保留明确禁用入口。
 - 展示到期、节点状态、节点额度配置与必要导入提示；后续 D10 接真实余额。
 
 ## OUT OF SCOPE
@@ -117,7 +118,7 @@ D05 有用户授权与加密 Credential，可实际代理；额度字段未执�
 ## MINIMUM TESTS
 
 - 两类 Token 隔离、旧值失效、越权修改拒绝。
-- 三格式解析/目标客户端检查及 Reality 连接 smoke；模板分流符合预期。
+- URI/Mihomo 解析、目标客户端检查及 Reality 连接 smoke；模板分流符合预期；sing-box Reality 验证明确拒绝导出并保留失败互通证据。
 - 组权限去重、失联保留、秘密不泄露。
 
 - 订阅包含合法客户端凭证且无服务器私钥；GET 不重置 Token，跨站重置被拒；批量部分失败不重复轮换成功项。

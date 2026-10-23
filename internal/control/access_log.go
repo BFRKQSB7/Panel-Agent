@@ -8,7 +8,7 @@ import (
 
 func accessLogPath(path string) string {
 	for _, prefix := range []string{"/u/", "/s/"} {
-		if strings.HasPrefix(path, prefix) {
+		if strings.Contains(path, prefix) {
 			return prefix + "[redacted]"
 		}
 	}

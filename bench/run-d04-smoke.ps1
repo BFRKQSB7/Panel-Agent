@@ -9,13 +9,15 @@ param(
     [string]$PreparedRemoteDirectory = '',
     [switch]$Authorization,
     [switch]$CoreTestsOnly,
-    [switch]$ClientCompatibilityOnly
+    [switch]$ClientCompatibilityOnly,
+    [switch]$SubscriptionsOnly
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $work = Join-Path $PSScriptRoot '.work'
 $runId = [guid]::NewGuid().ToString('N')
-$task = if($ClientCompatibilityOnly){'D06'}elseif($Authorization){'D05'}else{'D04'}
+if($SubscriptionsOnly){$Authorization=$true;. (Join-Path $PSScriptRoot 'd06-subscriptions.ps1')}
+$task = if($ClientCompatibilityOnly -or $SubscriptionsOnly){'D06'}elseif($Authorization){'D05'}else{'D04'}
 $local = Join-Path $work "$($task.ToLowerInvariant())-$runId"
 New-Item -ItemType Directory -Force -Path $local | Out-Null
 $remote = if ($PreparedRemoteDirectory) { $PreparedRemoteDirectory } else { "/tmp/panel-agent-d04-$runId" }
@@ -63,7 +65,7 @@ function Request([string]$Method, [string]$Path, [string]$Body='', [string]$Csrf
     if ($Csrf) { [void]$req.Headers.TryAddWithoutValidation('X-CSRF-Token',$Csrf) }
     try {
         $res=$http.SendAsync($req).GetAwaiter().GetResult()
-        try { return [pscustomobject]@{ Status=[int]$res.StatusCode; Body=$res.Content.ReadAsStringAsync().GetAwaiter().GetResult(); Location=[string]$res.Headers.Location } }
+        try { return [pscustomobject]@{ Status=[int]$res.StatusCode; Body=$res.Content.ReadAsStringAsync().GetAwaiter().GetResult(); Location=[string]$res.Headers.Location; NoStore=$res.Headers.CacheControl.NoStore; ReferrerPolicy=($res.Headers.GetValues('Referrer-Policy') -join ',') } }
         finally { $res.Dispose() }
     } finally { $req.Dispose() }
 }
@@ -157,7 +159,8 @@ function Test-NativeClientCompatibility {
     }
     $result.checks.native_client_compatibility=$results
     $result.compatibility=[ordered]@{server='Xray 26.10.21';mihomo='1.19.33';sing_box='1.14.3';control_xray_client_connected=$true}
-    $result.passed=($results.mihomo.reality_proxy_connected -or $results.'mihomo-mlkem'.reality_proxy_connected) -and $results.'sing-box'.configuration_check -and $results.'sing-box'.reality_proxy_connected
+    $result.excluded_combination='sing-box 1.14.3 Reality / Xray 26.10.21; explicitly disabled with user agreement'
+    $result.passed=$results.'mihomo-mlkem'.reality_proxy_connected -and $results.'sing-box'.configuration_check -and -not $results.'sing-box'.reality_proxy_connected
     Write-Output ($results|ConvertTo-Json -Depth 4)
 }
 function Test-AuthorizationChanges {
@@ -254,6 +257,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Relay build failed.' }
         & go build -o "$local/session-probe.exe" ./bench/session-probe
         if ($LASTEXITCODE -ne 0) { throw 'Session probe build failed.' }
+        if($SubscriptionsOnly){
+            & go build -o "$local/http-target.exe" ./bench/http-target
+            if($LASTEXITCODE -ne 0){throw 'Local HTTP target build failed.'}
+        }
         }
         if (-not $PreparedRemoteDirectory) {
             $env:GOOS='linux'
@@ -305,7 +312,7 @@ echo $! > monitor.pid
 '@
     [void](Remote $monitor.Replace('__REMOTE__',$remote))
     $pattern=if($CoreTestsOnly){'^Test(LostCandidateRetainsIdentityAndExplicitGap|RealCore.*)$'}elseif($Authorization){'^TestRealCore(ApplyAndCrashRecovery|ExpiryWithoutPanelAndRecovery|ExpiryDuringUnreachablePanel|FallbackDoesNotUndoRevocation)$'}else{'^TestRealCoreApplyAndCrashRecovery$'}
-    if(-not $ClientCompatibilityOnly){
+    if(-not $ClientCompatibilityOnly -and -not $SubscriptionsOnly){
     $test=Remote "cd '$remote'; TMPDIR='$remote' PANEL_AGENT_TEST_XRAY='$remote/xray' ./d04-core-tests -test.run '$pattern' -test.v -test.timeout 90s"
     [IO.File]::WriteAllText("$local/core-tests.txt",$test.Text)
     $result.checks.real_core_fault_suite='PASS'
@@ -340,6 +347,7 @@ echo $! > monitor.pid
     if (-not $machineID) { throw 'Machine identity missing.' }
     foreach ($index in 0..2) {
         $values=@{csrf=$adminCsrf;name="入口 $index";public_host='127.0.0.1';public_port=(45001+$index);listen_host='127.0.0.1';listen_port=(18443+$index);server_name='www.cloudflare.com';target='www.cloudflare.com:443';enabled='true'}
+        if($SubscriptionsOnly){$values.public_port=$values.listen_port}
         if(-not $Authorization){$values.development='true'}
         $form=Form $values
         if ((Request POST "/admin/machines/$machineID/nodes" $form).Status -ne 303) { throw 'Creating Node through its form failed.' }
@@ -377,6 +385,7 @@ echo $! > monitor.pid
     $client=Start-Local (Join-Path $work 'windows/xray.exe') @('run','-config',"$local/client.json")
     Start-Sleep -Milliseconds 500
     foreach ($port in 10808..10810) { Proxy-Get $port }
+    if($SubscriptionsOnly){Test-Subscriptions;return}
     if($ClientCompatibilityOnly){Test-NativeClientCompatibility;if(-not $result.passed){throw 'Pinned native client interoperability failed.'};return}
     $count=(Remote "for p in /proc/[0-9]*/cmdline; do tr '\000' ' ' 2>/dev/null < `$p | grep -F '$remote/xray run -config $remote/agent/core/' || true; done").Text.Split("`n",[StringSplitOptions]::RemoveEmptyEntries).Count
     if ($count -ne 1) { throw "Expected one managed Core, observed $count." }
@@ -508,6 +517,7 @@ awk '$1=="mem"{n++;if($2>m)m=$2} $1=="check"{c++;if($2>cm)cm=$2} $1=="run"{r++;i
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name,$oldEnv[$name],'Process') }
     $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath "$local/result.json" -Encoding utf8
     Write-Output "$task result: $local/result.json"
+    if($prepared -and $result.cleanup -ne 'PASS'){throw 'Smoke cleanup did not pass; see the saved result.'}
 }
 if (-not $result.passed) { throw 'D04 smoke did not pass.' }
 $result | ConvertTo-Json -Depth 12

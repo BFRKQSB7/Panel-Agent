@@ -99,6 +99,32 @@ Core 不写 access/error 日志，Agent 每次连续失联只输出一次有长�
 
 API 的 `expires_at` 留空或使用带时区的 RFC3339 时间；页面转换为 UTC。批量结果的错误码区分名称冲突、对象不存在、字段无效和保存失败，页面显示中文说明。返回的账户有效节点反映当前授权目标，实际生效进度以机器的已应用版本和心跳为准。
 
+## 私有用户页与订阅
+
+在“用户管理 → 私有链接管理”中选择用户，显式创建或重置用户页、订阅或两类独立 Token。默认使用 256 位随机秘密，可加 16 字符以内的可读前缀；完整自定义值必须通过长度、字符多样性及重复模式校验，推荐由密码管理器生成。完整值不能同时带前缀，也不能用于一次同时重置两类 Token。不同用户、不同类型及已撤销 Token 都禁止复用同一值。
+
+服务端只保存 hash，成功响应只显示一次明文。当前标签页用 sessionStorage 临时保留链接，30 分钟后读取失效；可点击清除按钮删除临时记录和当前交付区域的明文。换浏览器、丢失响应或关闭标签页后不能由服务端恢复秘密，需要明确发起新操作。批量操作最多 100 位用户，逐项交付并显示失败；15 分钟内使用同一签名操作凭据重试，已成功项只返回“已处理”，不再次轮换，也不重新交付明文。需要再次轮换成功项时先点击“开始新的一次操作”。
+
+用户页地址为 `/u/DASHBOARD_TOKEN`，订阅地址为 `/s/SUBSCRIPTION_TOKEN/uri` 或 `/s/SUBSCRIPTION_TOKEN/mihomo`。Dashboard 只显示本人的有效授权节点、账户到期和额度配置；当前无可靠用量，页面明确显示计量和额度执行尚未启用。心跳失联不会删除节点，心跳与已应用状态也不代表公网连通性。用户唯一写操作是重置自己的订阅 Token，重置后旧 URL 立即失效，已缓存的 VLESS UUID 保持有效；撤销连接需要管理员轮换协议凭证或改变授权，并等待 Agent 应用。
+
+| 格式 | 当前支持与导入方式 |
+|---|---|
+| URI | 逐行 VLESS Reality URI，包含正式 UUID、公网地址、公钥、SNI 和 Short ID。已按 Xray 26.10.21 验证连接；客户端自行设置分流，URI 不包含完整路由。 |
+| Mihomo | 导入完整配置 URL，或下载 `mihomo.yaml` 后作为配置文件加载；内容采用 JSON（YAML 子集）。固定按 Mihomo 1.19.33 验证，显式启用 `support-x25519mlkem768`，默认本机混合代理端口为 7890。 |
+| sing-box Reality | 用户已确认禁用当前组合。`/s/TOKEN/sing-box` 返回 HTTP 422 与明确原因，不能作为客户端配置导入。sing-box 1.14.3 与固定 Xray 26.10.21 的该组合实测认证失败。 |
+
+Mihomo 预设按顺序将局域网、国内域名和国内 IP 设为 DIRECT，其余交给 PROXY 选择组。国内数据来自 [MetaCubeX 的规则库](https://github.com/MetaCubeX/meta-rules-dat)，由客户端首次下载并每天更新；首次使用须确认两份规则已成功加载，网络无法下载时应先处理客户端的规则加载错误。导出配置不启用 TUN、不修改系统代理，也不包含外部控制接口；客户端需要自行选取 PROXY 组内节点。无有效授权节点时，PROXY 使用 REJECT，不输出虚构节点。
+
+页面和订阅使用 `private, no-store`、`no-referrer`，无外部页面脚本或追踪；服务端访问日志在进入路由前遮蔽私有路径，并且不记录 query、headers 或 body。若另接反向代理，应关闭这些路径的代理访问日志，避免代理在请求到达 Panel 前保存 Token。现代浏览器在 `no-referrer` 下的表单 POST 可能使用 `Origin: null`；仅 `Sec-Fetch-Site: same-origin` 且对应 CSRF / 签名操作凭据有效时接受，跨站或缺失签名仍拒绝。
+
+| 路径 | 操作 |
+|---|---|
+| `GET /api/admin/user-tokens/action` | 管理员获取 `action_token` 和 `csrf`；不创建或重置用户 Token。 |
+| `POST /api/admin/user-tokens/batch` | 管理员提交 `kind`（`dashboard` / `subscription` / `both`）、`action_token`、`items`；每项为 `user_id` 与可选 `spec: {prefix,value}`，返回逐项 `results`。需会话、CSRF 与来源校验。 |
+| `POST /u/DASHBOARD_TOKEN/subscription/reset` | 用户提交页面给出的 `action_token` 与可选 `spec`；必须来自本站，拒绝额外的用户 ID、组、额度和到期字段。GET 不执行重置。 |
+
+客户端字段依据 [Mihomo VLESS](https://wiki.metacubex.one/en/config/proxies/vless/) 和 [Reality TLS 选项](https://wiki.metacubex.one/en/config/proxies/tls/)。sing-box 的当前限制可见其 [Reality 实现](https://github.com/SagerNet/sing-box/blob/v1.14.3/common/tls/reality_client.go)；配置解析通过不能代替实际握手验收。
+
 ## 验证
 
 ```powershell

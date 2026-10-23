@@ -1,0 +1,36 @@
+{
+  "task": "D06",
+  "host": "iceland-W8eRiY",
+  "passed": false,
+  "checks": {
+    "native_client_compatibility": {
+      "mihomo": {
+        "configuration_check": true,
+        "reality_proxy_connected": false
+      },
+      "mihomo-mlkem": {
+        "configuration_check": true,
+        "reality_proxy_connected": true
+      },
+      "sing-box": {
+        "configuration_check": true,
+        "reality_proxy_connected": false
+      }
+    }
+  },
+  "compatibility": {
+    "server": "Xray 26.10.21",
+    "mihomo": "1.19.33",
+    "sing_box": "1.14.3",
+    "control_xray_client_connected": true
+  },
+  "resources": {
+    "system_samples": 7673,
+    "system_peak_bytes": 89391104,
+    "check_samples": 1,
+    "check_sampled_hwm_kib": 13732,
+    "run_samples": 2353,
+    "run_sampled_hwm_kib": 21968
+  },
+  "cleanup": "PASS"
+}

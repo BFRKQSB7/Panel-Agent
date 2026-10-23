@@ -51,7 +51,7 @@
     // already discarded it; a new GET cannot deliver it again.
     for (const delivery of document.querySelectorAll("[data-token-delivery]")) {
       delete delivery.dataset.token;
-      for (const input of delivery.querySelectorAll("input")) input.value = "";
+      for (const input of delivery.querySelectorAll("input")) { input.removeAttribute("value"); input.value = ""; }
     }
     document.getElementById("token-cache-message").textContent = "已清除临时 Token；已交付或已导入的凭证仍然有效。";
   });

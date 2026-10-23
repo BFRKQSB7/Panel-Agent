@@ -269,6 +269,12 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 		return false
 	}
 	origin := r.Header.Get("Origin")
+	// no-referrer makes navigation POSTs use an opaque Origin in browsers.
+	// Accept only the browser's same-origin Fetch Metadata indication; callers
+	// still require the session CSRF token or a signed capability action.
+	if origin == "null" {
+		return r.Header.Get("Sec-Fetch-Site") == "same-origin"
+	}
 	if origin == "" {
 		return true
 	}
