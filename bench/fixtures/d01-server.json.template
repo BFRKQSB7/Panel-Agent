@@ -1,0 +1,79 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": ["StatsService"]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+      }
+    }
+  },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": 18443,
+      "protocol": "vless",
+      "tag": "node-a",
+      "settings": {
+        "clients": [{"id": "{{UUID}}", "email": "u0001-n01"}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.cloudflare.com:443",
+          "serverNames": ["www.cloudflare.com"],
+          "privateKey": "{{REALITY_PRIVATE_KEY}}",
+          "shortIds": ["{{SHORT_ID}}"]
+        }
+      }
+    },
+    {
+      "listen": "0.0.0.0",
+      "port": 18444,
+      "protocol": "vless",
+      "tag": "node-b",
+      "settings": {
+        "clients": [{"id": "{{UUID}}", "email": "u0001-n02"}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.cloudflare.com:443",
+          "serverNames": ["www.cloudflare.com"],
+          "privateKey": "{{REALITY_PRIVATE_KEY}}",
+          "shortIds": ["{{SHORT_ID}}"]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct",
+      "settings": {
+        "finalRules": [
+          {
+            "network": "tcp",
+            "action": "allow",
+            "port": "18080",
+            "ip": ["{{WSL_IPV4_CIDR}}"]
+          }
+        ]
+      }
+    }
+  ]
+}
