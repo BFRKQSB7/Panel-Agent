@@ -1,0 +1,69 @@
+{
+  "task": "D01",
+  "observed_date": "2026-10-23",
+  "client_timezone": "America/Los_Angeles",
+  "result": "PASS",
+  "environment": {
+    "machine_record": "VPS/servers/LazyCatCloud-玩具冰岛",
+    "hostname": "iceland-W8eRiY",
+    "internal_ipv4": "10.88.234.165",
+    "ssh_port": 45000,
+    "os": "Alpine Linux 3.23.4",
+    "kernel": "7.0.0-34-generic",
+    "architecture": "amd64",
+    "virtualization": "shared-kernel VPS container",
+    "ram_limit_bytes": 134217728,
+    "swap_limit_bytes": 134217728,
+    "root_disk_total_kib": 1058304,
+    "root_disk_available_before_kib": 906368,
+    "root_disk_available_after_kib": 906368,
+    "acceptance": "User explicitly accepted this entire VPS container, including Alpine and existing OS services; this is not an independent-kernel VM result."
+  },
+  "xray": {
+    "version": "26.10.21",
+    "commit": "1b1647c",
+    "linux_archive_sha256": "0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978",
+    "simultaneous_server_cores": 1,
+    "server_bind": "127.0.0.1",
+    "client_platform": "windows/amd64",
+    "transport_to_test_host": "SSH exec nc relay with pinned ED25519 known_hosts; SSH forwarding remains disabled"
+  },
+  "checks": {
+    "config_check": true,
+    "successful_http_requests": 16,
+    "requests_per_parallel_burst": 4,
+    "http_response_bytes": 18,
+    "shared_uuid_with_distinct_node_emails": true,
+    "node_counters_isolated": true,
+    "repeated_reads_do_not_reset": true,
+    "core_restart_changes_process_identity": true,
+    "core_restart_counters_zero": true,
+    "existing_filepanel_nginx_processes_unchanged": true,
+    "test_processes_and_directory_removed": true,
+    "original_listeners_preserved": true
+  },
+  "metrics": {
+    "config_check_sampled_process_hwm_kib": 14332,
+    "stages": [
+      {"stage": "startup", "process_hwm_kib": 20420, "system_cgroup_bytes": 65282048},
+      {"stage": "idle-5s", "process_hwm_kib": 20420, "system_cgroup_bytes": 65081344},
+      {"stage": "low-concurrency-node-a", "process_hwm_kib": 21284, "system_cgroup_bytes": 66551808},
+      {"stage": "low-concurrency-node-b", "process_hwm_kib": 21676, "system_cgroup_bytes": 66818048}
+    ],
+    "sampled_system_peak_bytes": 67182592,
+    "system_sample_interval_ms": 50,
+    "system_samples": 1349,
+    "swap_current_after_bytes": 933888,
+    "oom_before": 0,
+    "oom_after": 0,
+    "oom_kill_before": 0,
+    "oom_kill_after": 0,
+    "oom_group_kill_before": 0,
+    "oom_group_kill_after": 0,
+    "node_a_final_uplink_downlink": [624, 1080],
+    "node_b_final_uplink_downlink": [624, 1080],
+    "node_a_after_restart_uplink_downlink": [0, 0],
+    "node_b_after_restart_uplink_downlink": [0, 0]
+  },
+  "scope": "Core prototype only, with existing FilePanel/nginx left running. Sampled system peak includes guest OS services and test SSH processes; it is not an unsampled absolute peak, public NAT port acceptance, or the later full Panel + Agent resource gate."
+}

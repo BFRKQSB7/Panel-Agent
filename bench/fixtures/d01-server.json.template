@@ -70,7 +70,7 @@
             "network": "tcp",
             "action": "allow",
             "port": "18080",
-            "ip": ["{{WSL_IPV4_CIDR}}"]
+            "ip": ["{{TARGET_IPV4_CIDR}}"]
           }
         ]
       }

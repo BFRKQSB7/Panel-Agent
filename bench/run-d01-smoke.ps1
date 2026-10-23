@@ -1,4 +1,15 @@
 #requires -Version 7.0
+param(
+    [string]$SshDestination = '',
+    [int]$SshPort = 22,
+    [string]$SshIdentityFile = '',
+    [string]$SshKnownHostsFile = '',
+    [string]$ExpectedHostname = '',
+    [string]$ExpectedIPv4 = '',
+    [switch]$Require128MiB,
+    [switch]$DebugXray
+)
+
 $ErrorActionPreference = 'Stop'
 
 $xrayVersion = '26.10.21'
@@ -32,6 +43,22 @@ $startedDebianByUs = $false
 $debianWasRunning = $false
 $linuxServerPid = $null
 $linuxTargetPid = $null
+$sshMode = -not [string]::IsNullOrWhiteSpace($SshDestination)
+$sshTunnel = $null
+$sshTunnelOutput = $null
+$sshTunnelError = $null
+$linuxPrepared = $false
+$smokePassed = $false
+if ($sshMode) {
+    if ($SshDestination -notmatch '^[a-zA-Z0-9_.@:-]+$' -or $SshPort -lt 1 -or $SshPort -gt 65535 -or $ExpectedHostname -notmatch '^[a-zA-Z0-9_.-]+$') {
+        throw 'SSH mode requires a valid destination, port, and expected hostname.'
+    }
+    $expectedAddress = [Net.IPAddress]::Parse($ExpectedIPv4)
+    if ($expectedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'ExpectedIPv4 must be a literal IPv4 address.' }
+    $SshIdentityFile = (Resolve-Path -LiteralPath $SshIdentityFile).Path
+    $SshKnownHostsFile = (Resolve-Path -LiteralPath $SshKnownHostsFile).Path
+    $sshOptions = @('-F', 'NUL', '-i', $SshIdentityFile, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$SshKnownHostsFile", '-o', 'ConnectTimeout=15')
+}
 
 function Assert-CommandSucceeded([string]$operation) {
     if ($LASTEXITCODE -ne 0) {
@@ -39,11 +66,53 @@ function Assert-CommandSucceeded([string]$operation) {
     }
 }
 
-function Invoke-WslScript([string]$script) {
+function Invoke-LinuxScript([string]$script) {
+    $helpers = @'
+set -eu
+is_listening() {
+  hex=$(printf '%04X' "$1")
+  awk -v suffix=":$hex" '$4 == "0A" && substr($2, length($2)-4) == suffix { found=1 } END { exit !found }' /proc/net/tcp /proc/net/tcp6
+}
+process_args() { tr '\000' ' ' < "/proc/$1/cmdline"; }
+'@
+    $script = ($helpers + "`n" + $script).Replace("`r`n", "`n")
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script))
-    $output = & wsl.exe --distribution Debian --exec sh -lc "printf '%s' '$encoded' | base64 -d | sh"
-    Assert-CommandSucceeded 'WSL helper'
+    if ($sshMode) {
+        $output = & ssh @sshOptions -p $SshPort $SshDestination "printf '%s' '$encoded' | base64 -d | sh"
+    } else {
+        $output = & wsl.exe --distribution Debian --exec sh -lc "printf '%s' '$encoded' | base64 -d | sh"
+    }
+    Assert-CommandSucceeded 'Linux helper'
     return ,$output
+}
+
+function Get-LinuxAssetPath([string]$windowsPath) {
+    if ($sshMode) { return "$linuxRunDirectory/$([IO.Path]::GetFileName($windowsPath))" }
+    return Get-WslPath $windowsPath
+}
+
+function Start-SshTunnel {
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $relayPath
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    foreach ($argument in @('-destination', $SshDestination, '-port', "$SshPort", '-identity', $SshIdentityFile, '-known-hosts', $SshKnownHostsFile)) {
+        $info.ArgumentList.Add($argument)
+    }
+    $script:sshTunnel = [Diagnostics.Process]::new()
+    $script:sshTunnel.StartInfo = $info
+    if (-not $script:sshTunnel.Start()) { throw 'Could not start SSH tunnel.' }
+    $script:sshTunnelOutput = $script:sshTunnel.StandardOutput.ReadToEndAsync()
+    $script:sshTunnelError = $script:sshTunnel.StandardError.ReadToEndAsync()
+    for ($attempt = 0; $attempt -lt 150; $attempt++) {
+        if ($script:sshTunnel.HasExited) { throw "SSH tunnel exited: $($script:sshTunnelError.GetAwaiter().GetResult())" }
+        $tcp = [Net.Sockets.TcpClient]::new()
+        try { $tcp.Connect('127.0.0.1', 10085); return } catch { Start-Sleep -Milliseconds 100 } finally { $tcp.Dispose() }
+    }
+    throw 'SSH tunnel did not become ready.'
 }
 
 function Get-WslPath([string]$windowsPath) {
@@ -116,9 +185,11 @@ test -r "/proc/$pid/status"
 printf 'stage=@@STAGE@@ '
 awk '/^VmRSS:/ { printf "rss_kib=%s ", $2 } /^VmHWM:/ { printf "hwm_kib=%s\n", $2 }' "/proc/$pid/status"
 awk '/^MemTotal:/ { printf "guest_total_kib=%s ", $2 } /^MemAvailable:/ { printf "guest_available_kib=%s\n", $2 }' /proc/meminfo
+if [ -r /sys/fs/cgroup/memory.current ]; then printf 'system_cgroup_bytes='; cat /sys/fs/cgroup/memory.current; fi
+if [ -r /sys/fs/cgroup/memory.swap.current ]; then printf 'system_swap_bytes='; cat /sys/fs/cgroup/memory.swap.current; fi
 '@
     $script = $script.Replace('@@PID@@', "$processId").Replace('@@STAGE@@', $stage)
-    $output = Invoke-WslScript $script
+    $output = Invoke-LinuxScript $script
     return (($output -join ' ') -replace [string][char]0, '').Trim()
 }
 
@@ -127,9 +198,6 @@ function Start-TestCore {
 set -eu
 run_dir='@@RUN_DIR@@'
 config="$run_dir/server.json"
-is_listening() {
-  ss -H -ltn | awk -v port=":$1" '$4 ~ (port "$") { found=1 } END { exit !found }'
-}
 nohup "$run_dir/xray" run -config "$config" >"$run_dir/xray.log" 2>&1 < /dev/null &
 pid=$!
 printf '%s\n' "$pid" >"$run_dir/server.pid"
@@ -141,12 +209,12 @@ while [ "$i" -lt 50 ]; do
   sleep 0.1
 done
 if [ "$i" -ge 50 ]; then cat "$run_dir/xray.log" >&2; exit 1; fi
-args=$(ps -o args= -p "$pid")
+args=$(process_args "$pid")
 case "$args" in *"$run_dir/xray run -config $config"*) ;; *) echo "Unexpected Xray command: $args" >&2; exit 1 ;; esac
-printf 'pid=%s start=%s\n' "$pid" "$(ps -o lstart= -p "$pid" | xargs)"
+printf 'pid=%s start=%s\n' "$pid" "$(awk '{ print $22 }' /proc/$pid/stat)"
 '@
     $script = $script.Replace('@@RUN_DIR@@', $linuxRunDirectory)
-    $output = Invoke-WslScript $script
+    $output = Invoke-LinuxScript $script
     $text = (($output -join [Environment]::NewLine) -replace [string][char]0, '').Trim()
     $match = [regex]::Match($text, '(?m)^pid=([0-9]+) start=(.+)$')
     if (-not $match.Success) {
@@ -160,11 +228,8 @@ function Stop-TestCore([int]$processId) {
 set -eu
 run_dir='@@RUN_DIR@@'
 pid='@@PID@@'
-is_listening() {
-  ss -H -ltn | awk -v port=":$1" '$4 ~ (port "$") { found=1 } END { exit !found }'
-}
 if kill -0 "$pid" 2>/dev/null; then
-  args=$(ps -o args= -p "$pid")
+  args=$(process_args "$pid")
   case "$args" in *"$run_dir/xray run -config $run_dir/server.json"*) kill "$pid" ;; *) echo "Refusing to stop unexpected process: $args" >&2; exit 1 ;; esac
   i=0
   while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do i=$((i + 1)); sleep 0.1; done
@@ -175,16 +240,16 @@ while { is_listening 10085 || is_listening 18443 || is_listening 18444; } && [ "
 if is_listening 10085 || is_listening 18443 || is_listening 18444; then echo 'Xray listeners did not stop' >&2; exit 1; fi
 '@
     $script = $script.Replace('@@RUN_DIR@@', $linuxRunDirectory).Replace('@@PID@@', "$processId")
-    Invoke-WslScript $script | Out-Null
+    Invoke-LinuxScript $script | Out-Null
 }
 
 function Start-TestTarget([string]$targetBinaryPath, [string]$guestIp) {
-    $linuxTarget = Get-WslPath $targetBinaryPath
+    $linuxTarget = Get-LinuxAssetPath $targetBinaryPath
     $script = @'
 set -eu
 run_dir='@@RUN_DIR@@'
 guest_ip='@@GUEST_IP@@'
-cp '@@TARGET_BINARY@@' "$run_dir/http-target"
+if [ '@@TARGET_BINARY@@' != "$run_dir/http-target" ]; then cp '@@TARGET_BINARY@@' "$run_dir/http-target"; fi
 chmod 700 "$run_dir/http-target"
 nohup "$run_dir/http-target" -listen "$guest_ip:18080" >"$run_dir/target.log" 2>&1 < /dev/null &
 pid=$!
@@ -192,14 +257,14 @@ printf '%s\n' "$pid" >"$run_dir/target.pid"
 i=0
 while [ "$i" -lt 50 ]; do
   if ! kill -0 "$pid" 2>/dev/null; then cat "$run_dir/target.log" >&2; exit 1; fi
-  if ss -H -ltn | grep -Fq "$guest_ip:18080"; then break; fi
+  if is_listening 18080; then break; fi
   i=$((i + 1)); sleep 0.1
 done
 if [ "$i" -ge 50 ]; then cat "$run_dir/target.log" >&2; exit 1; fi
 printf '%s\n' "$pid"
 '@
     $script = $script.Replace('@@RUN_DIR@@', $linuxRunDirectory).Replace('@@GUEST_IP@@', $guestIp).Replace('@@TARGET_BINARY@@', $linuxTarget)
-    $output = Invoke-WslScript $script
+    $output = Invoke-LinuxScript $script
     $text = (($output -join [Environment]::NewLine) -replace [string][char]0, '').Trim()
     if ($text -notmatch '(?m)^\d+$') {
         throw "Could not identify the test target process: $text"
@@ -209,7 +274,7 @@ printf '%s\n' "$pid"
 
 function Invoke-NodeBurst([string]$node, [int]$serverPort, [string]$guestIp, [string]$uuid, [string]$publicKey, [string]$shortId) {
     $clientConfig = @{
-        log = @{ loglevel = 'warning' }
+        log = @{ loglevel = $(if ($DebugXray) { 'debug' } else { 'warning' }) }
         inbounds = @(@{
             listen = '127.0.0.1'
             port = 10808
@@ -265,7 +330,7 @@ function Invoke-NodeBurst([string]$node, [int]$serverPort, [string]$guestIp, [st
         for ($request = 0; $request -lt 4; $request++) {
             $requestOut = Join-Path $work "curl-$node-$request.stdout.log"
             $requestErr = Join-Path $work "curl-$node-$request.stderr.log"
-            $arguments = '--fail --silent --show-error --max-time 30 --proxy socks5h://127.0.0.1:10808 --output NUL --write-out "http=%{http_code} bytes=%{size_download}" "http://' + $guestIp + ':18080/"'
+            $arguments = '--fail --silent --show-error --max-time 30 --noproxy "" --proxy socks5h://127.0.0.1:10808 --output NUL --write-out "http=%{http_code} bytes=%{size_download}" "http://' + $guestIp + ':18080/"'
             $curl = Start-Process -FilePath "$env:SystemRoot\System32\curl.exe" -ArgumentList $arguments -WorkingDirectory $work -WindowStyle Hidden -PassThru -RedirectStandardOutput $requestOut -RedirectStandardError $requestErr
             $curlProcesses.Add($curl)
         }
@@ -300,6 +365,20 @@ try {
         throw "Unexpected Windows Xray version: $($versionOutput -join ' ')"
     }
 
+    if ($sshMode) {
+        $identityCheck = @'
+[ "$(hostname)" = '@@HOSTNAME@@' ] || { echo 'SSH hostname mismatch' >&2; exit 18; }
+ip -4 -o addr show scope global | grep -F '@@IPV4@@/' >/dev/null || { echo 'SSH internal IPv4 mismatch' >&2; exit 18; }
+command -v nc >/dev/null || { echo 'SSH smoke requires existing nc' >&2; exit 18; }
+printf 'verified_host=%s internal_ipv4=@@IPV4@@ kernel=' "$(hostname)"; uname -r
+awk '/^MemTotal:|^SwapTotal:/ { print }' /proc/meminfo
+df -k /
+for file in /proc/[0-9]*/comm; do if [ -r "$file" ] && [ "$(cat "$file")" = xray ]; then echo 'An existing Xray Core is running' >&2; exit 19; fi; done
+'@
+        $identityCheck = $identityCheck.Replace('@@HOSTNAME@@', $ExpectedHostname).Replace('@@IPV4@@', $ExpectedIPv4)
+        (Invoke-LinuxScript $identityCheck) | ForEach-Object { Write-Host $_ }
+        $guestIp = '127.0.0.1'
+    } else {
     $distros = ((& wsl.exe --list --quiet) -join [Environment]::NewLine) -replace [string][char]0, ''
     Assert-CommandSucceeded 'List WSL distributions'
     if ($distros -notmatch '(?im)^\s*Debian\s*$') {
@@ -311,21 +390,36 @@ try {
     & wsl.exe --distribution Debian --exec /bin/true
     Assert-CommandSucceeded 'Start Debian WSL'
 
-    $guestIpText = Invoke-WslScript 'hostname -I | cut -d " " -f 1'
+    $guestIpText = Invoke-LinuxScript 'hostname -I | cut -d " " -f 1'
     $guestIp = (($guestIpText -join ' ') -replace [string][char]0, '').Trim()
     $guestAddress = [Net.IPAddress]::Parse($guestIp)
     if ($guestAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
         throw "Expected an IPv4 WSL address, got $guestIp"
     }
-    $portCheckScript = @'
-if ss -H -ltn | awk '{print $4}' | grep -Eq ':(10085|18080|18443|18444)$'; then echo 'A D01 WSL port is already occupied'; exit 17; fi
+    }
+    if ($Require128MiB) {
+        $memoryCheck = @'
+total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+[ "$total" -le 131072 ] && [ "$total" -ge 120000 ] || { echo "Expected 128MiB whole-system RAM, found $total KiB" >&2; exit 20; }
+if [ -r /sys/fs/cgroup/memory.max ]; then [ "$(cat /sys/fs/cgroup/memory.max)" = 134217728 ]; grep -Fx '0::/' /proc/1/cgroup >/dev/null; fi
 '@
-    $portCheck = Invoke-WslScript $portCheckScript
+        Invoke-LinuxScript $memoryCheck | Out-Null
+    }
+    $portCheckScript = @'
+for port in 10085 18080 18443 18444; do if is_listening "$port"; then echo "A D01 Linux port is already occupied: $port" >&2; exit 17; fi; done
+'@
+    $portCheck = Invoke-LinuxScript $portCheckScript
     if (($portCheck -join '').Trim()) {
         throw ($portCheck -join ' ')
     }
     $tcp = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 10808)
     try { $tcp.Start() } finally { $tcp.Stop() }
+    if ($sshMode) {
+        foreach ($port in @(10085,18443,18444)) {
+            $tcp = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
+            try { $tcp.Start() } finally { $tcp.Stop() }
+        }
+    }
 
     $env:GOOS = 'linux'
     $env:GOARCH = 'amd64'
@@ -339,6 +433,11 @@ if ss -H -ltn | awk '{print $4}' | grep -Eq ':(10085|18080|18443|18444)$'; then 
     $probePath = Join-Path $work 'stats-probe.exe'
     & go build -o $probePath ./cmd/stats-probe
     Assert-CommandSucceeded 'Build Go StatsService probe'
+    if ($sshMode) {
+        $relayPath = Join-Path $work 'ssh-relay.exe'
+        & go build -o $relayPath ./bench/ssh-relay
+        Assert-CommandSucceeded 'Build local SSH exec relay'
+    }
     foreach ($name in @('GOOS', 'GOARCH', 'CGO_ENABLED')) {
         $value = $originalEnvironment[$name]
         if ($null -eq $value) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue } else { Set-Item "Env:$name" $value }
@@ -363,7 +462,9 @@ if ss -H -ltn | awk '{print $4}' | grep -Eq ':(10085|18080|18443|18444)$'; then 
     $serverConfig = $serverConfig.Replace('{{UUID}}', $uuid)
     $serverConfig = $serverConfig.Replace('{{REALITY_PRIVATE_KEY}}', $privateKey)
     $serverConfig = $serverConfig.Replace('{{SHORT_ID}}', $shortId)
-    $serverConfig = $serverConfig.Replace('{{WSL_IPV4_CIDR}}', "$guestIp/32")
+    $serverConfig = $serverConfig.Replace('{{TARGET_IPV4_CIDR}}', "$guestIp/32")
+    if ($sshMode) { $serverConfig = $serverConfig.Replace('"listen": "0.0.0.0"', '"listen": "127.0.0.1"') }
+    if ($DebugXray) { $serverConfig = $serverConfig.Replace('"loglevel": "warning"', '"loglevel": "debug"') }
     if ($serverConfig.Contains('{{')) { throw 'D01 server template contains an unresolved placeholder.' }
     $null = $serverConfig | ConvertFrom-Json
     $serverConfigPath = Join-Path $work 'server.json'
@@ -373,16 +474,38 @@ if ss -H -ltn | awk '{print $4}' | grep -Eq ':(10085|18080|18443|18444)$'; then 
         throw "Windows Xray server config test failed: $($serverTestOutput -join ' ')"
     }
 
-    $linuxXrayOnWsl = Get-WslPath $linuxXray
-    $serverConfigOnWsl = Get-WslPath $serverConfigPath
-    $targetBinaryOnWsl = Get-WslPath $targetBinary
+    if ($sshMode) {
+        Invoke-LinuxScript "test ! -e '$linuxRunDirectory'; mkdir -m 700 '$linuxRunDirectory'" | Out-Null
+        $linuxPrepared = $true
+        $linuxArchivePath = Join-Path $work 'Xray-linux-64.zip'
+        & scp -O @sshOptions -P $SshPort $linuxArchivePath $serverConfigPath $targetBinary "${SshDestination}:$linuxRunDirectory/"
+        Assert-CommandSucceeded 'Upload isolated D01 assets'
+        $unpack = "umask 077; printf '%s\n' '$($linuxArchiveHash.ToLowerInvariant())  $linuxRunDirectory/Xray-linux-64.zip' | sha256sum -c -; unzip -p '$linuxRunDirectory/Xray-linux-64.zip' xray > '$linuxRunDirectory/xray'; rm -- '$linuxRunDirectory/Xray-linux-64.zip'"
+        Invoke-LinuxScript $unpack | ForEach-Object { Write-Host $_ }
+    }
+    $linuxXraySource = Get-LinuxAssetPath $linuxXray
+    $serverConfigSource = Get-LinuxAssetPath $serverConfigPath
     $stage = @'
 set -eu
 run_dir='@@RUN_DIR@@'
-mkdir -m 700 "$run_dir"
-cp '@@LINUX_XRAY@@' "$run_dir/xray"
+if [ ! -d "$run_dir" ]; then mkdir -m 700 "$run_dir"; fi
+if [ '@@LINUX_XRAY@@' != "$run_dir/xray" ]; then cp '@@LINUX_XRAY@@' "$run_dir/xray"; fi
 chmod 700 "$run_dir/xray"
-cp '@@SERVER_CONFIG@@' "$run_dir/server.json"
+if [ '@@SERVER_CONFIG@@' != "$run_dir/server.json" ]; then cp '@@SERVER_CONFIG@@' "$run_dir/server.json"; fi
+for file in /proc/[0-9]*/comm; do
+  if [ -r "$file" ]; then
+    name=$(cat "$file")
+    case "$name" in filepanel|nginx) pid=${file#/proc/}; pid=${pid%/comm}; printf '%s %s %s\n' "$pid" "$(awk '{ print $22 }' /proc/$pid/stat)" "$name" >> "$run_dir/protected-processes" ;; esac
+  fi
+done
+if [ -r /sys/fs/cgroup/memory.current ]; then
+  cat /sys/fs/cgroup/memory.events > "$run_dir/memory.events.before"
+  cat > "$run_dir/sample-memory.sh" <<'SAMPLER'
+while :; do cat /sys/fs/cgroup/memory.current; sleep 0.05; done
+SAMPLER
+  nohup sh "$run_dir/sample-memory.sh" > "$run_dir/memory.samples" 2>"$run_dir/memory-sampler.log" < /dev/null &
+  printf '%s\n' "$!" > "$run_dir/sampler.pid"
+fi
 "$run_dir/xray" version | grep -F 'Xray @@XRAY_VERSION@@ '
 "$run_dir/xray" run -test -config "$run_dir/server.json" >"$run_dir/config-check.log" 2>&1 &
 pid=$!
@@ -399,14 +522,15 @@ cat "$run_dir/config-check.log"
 if [ "$status" -ne 0 ]; then exit "$status"; fi
 printf 'config_check_peak_rss_kib=%s\n' "$peak"
 '@
-    $stage = $stage.Replace('@@RUN_DIR@@', $linuxRunDirectory).Replace('@@LINUX_XRAY@@', $linuxXrayOnWsl).Replace('@@SERVER_CONFIG@@', $serverConfigOnWsl).Replace('@@XRAY_VERSION@@', $xrayVersion)
-    $stageOutput = Invoke-WslScript $stage
+    $stage = $stage.Replace('@@RUN_DIR@@', $linuxRunDirectory).Replace('@@LINUX_XRAY@@', $linuxXraySource).Replace('@@SERVER_CONFIG@@', $serverConfigSource).Replace('@@XRAY_VERSION@@', $xrayVersion)
+    $stageOutput = Invoke-LinuxScript $stage
     Write-Host 'Linux Core version and config check:'
     $stageOutput | ForEach-Object { Write-Host $_ }
 
     $linuxTargetPid = Start-TestTarget $targetBinary $guestIp
     $coreBeforeRestart = Start-TestCore
     $linuxServerPid = $coreBeforeRestart.Pid
+    if ($sshMode) { Start-SshTunnel }
     Write-Host "core_instance=pid-$($coreBeforeRestart.Pid)-$($coreBeforeRestart.Start)"
     Write-Host (Read-CoreSnapshot $linuxServerPid 'startup')
     Start-Sleep -Seconds 5
@@ -449,7 +573,7 @@ printf 'config_check_peak_rss_kib=%s\n' "$peak"
     if ((Get-Counter $upA) -ne $aUpAgain -or (Get-Counter $downA) -ne $aDownAgain) {
         throw 'Node B traffic changed the Node A counters.'
     }
-    Write-Host "same_uuid=$uuid node_a=$aUpAgain/$aDownAgain node_b=$bUpAgain/$bDownAgain"
+    Write-Host "same_uuid_across_nodes=true node_a=$aUpAgain/$aDownAgain node_b=$bUpAgain/$bDownAgain"
     Write-Host "repeated_read_node_a=$((Get-Counter $upA))/$((Get-Counter $downA)); node_b=$((Get-Counter $upB))/$((Get-Counter $downB))"
 
     Stop-TestCore $linuxServerPid
@@ -466,23 +590,58 @@ printf 'config_check_peak_rss_kib=%s\n' "$peak"
         throw "Counters survived a full Core restart unexpectedly: node-a=$restartAUp/$restartADown node-b=$restartBUp/$restartBDown"
     }
     Write-Host "core_restart=pid-$($coreBeforeRestart.Pid)-$($coreBeforeRestart.Start) -> pid-$($coreAfterRestart.Pid)-$($coreAfterRestart.Start); counters=0/0,0/0"
+    $resourceCheck = @'
+run_dir='@@RUN_DIR@@'
+if [ -f "$run_dir/memory.events.before" ]; then
+  cat /sys/fs/cgroup/memory.events > "$run_dir/memory.events.after"
+  awk 'NR==FNR { before[$1]=$2; next } ($1=="oom" || $1=="oom_kill" || $1=="oom_group_kill") { printf "%s_before=%s after=%s\n", $1, before[$1], $2; if ($2!=before[$1]) bad=1 } END { exit bad }' "$run_dir/memory.events.before" "$run_dir/memory.events.after"
+  awk 'BEGIN { peak=0 } $1>peak { peak=$1 } END { printf "sampled_system_peak_bytes=%s samples=%s\n", peak, NR; if (NR<2) exit 1 }' "$run_dir/memory.samples"
+  printf 'swap_current_bytes='; cat /sys/fs/cgroup/memory.swap.current
+fi
+if [ -f "$run_dir/protected-processes" ]; then
+  while read -r pid start name; do [ -r "/proc/$pid/stat" ] && [ "$(awk '{ print $22 }' /proc/$pid/stat)" = "$start" ] || { echo "Existing $name process changed: $pid" >&2; exit 21; }; done < "$run_dir/protected-processes"
+  printf 'existing_filepanel_nginx_processes_unchanged=true\n'
+fi
+'@
+    (Invoke-LinuxScript ($resourceCheck.Replace('@@RUN_DIR@@', $linuxRunDirectory))) | ForEach-Object { Write-Host $_ }
+    $smokePassed = $true
     Write-Host 'D01 REALITY + separate cumulative StatsService counters smoke: PASS'
 }
 finally {
-    if ($debianWasRunning -or $startedDebianByUs) {
+    if ($null -ne $sshTunnel) {
+        if (-not $sshTunnel.HasExited) { $sshTunnel.Kill(); $sshTunnel.WaitForExit() }
+        $sshTunnelOutput.GetAwaiter().GetResult() | Out-Null
+        Write-Utf8NoBom (Join-Path $work "ssh-tunnel-$runId.log") $sshTunnelError.GetAwaiter().GetResult()
+        $sshTunnel.Dispose()
+    }
+    if ($linuxPrepared -or $debianWasRunning -or $startedDebianByUs) {
+        if (-not $smokePassed) {
+            $diagnostic = @'
+run_dir='@@RUN_DIR@@'
+for file in xray.log target.log config-check.log; do if [ -f "$run_dir/$file" ]; then printf '\n--- %s ---\n' "$file"; tail -n 120 "$run_dir/$file"; fi; done
+if [ -r /sys/fs/cgroup/memory.events ]; then cat /sys/fs/cgroup/memory.events; fi
+'@
+            $diagnosticOutput = Invoke-LinuxScript ($diagnostic.Replace('@@RUN_DIR@@', $linuxRunDirectory))
+            $diagnosticPath = Join-Path $work "d01-$runId-remote.log"
+            Write-Utf8NoBom $diagnosticPath ($diagnosticOutput -join "`n")
+            Write-Warning "Remote diagnostic saved at $diagnosticPath"
+        }
         $cleanup = @'
 set -eu
 run_dir='@@RUN_DIR@@'
+case "$run_dir" in /tmp/panel-agent-d01-????????????????????????????????) ;; *) echo 'Unsafe cleanup directory' >&2; exit 22 ;; esac
+[ ! -L "$run_dir" ] || { echo 'Refusing symlink cleanup' >&2; exit 22; }
 if [ -d "$run_dir" ]; then
-  for file in server.pid target.pid; do
+  for file in server.pid target.pid sampler.pid; do
     if [ -f "$run_dir/$file" ]; then
       pid=$(cat "$run_dir/$file")
       case "$pid" in ''|*[!0-9]*) echo "Invalid PID in $run_dir/$file" >&2; exit 1 ;; esac
       if kill -0 "$pid" 2>/dev/null; then
-        args=$(ps -o args= -p "$pid")
+        args=$(process_args "$pid")
         case "$file:$args" in
           "server.pid:$run_dir/xray run -config $run_dir/server.json"*) kill "$pid" ;;
           "target.pid:$run_dir/http-target -listen "*) kill "$pid" ;;
+          "sampler.pid:sh $run_dir/sample-memory.sh"*) kill "$pid" ;;
           *) echo "Refusing to stop unexpected process: $args" >&2; exit 1 ;;
         esac
       fi
@@ -493,7 +652,7 @@ if [ -d "$run_dir" ]; then
 fi
 '@
         $cleanup = $cleanup.Replace('@@RUN_DIR@@', $linuxRunDirectory)
-        try { Invoke-WslScript $cleanup | Out-Null } catch { Write-Warning "WSL process cleanup needs attention: $_" }
+        Invoke-LinuxScript $cleanup | Out-Null
     }
     if ($startedDebianByUs) {
         & wsl.exe --terminate Debian 2>$null
