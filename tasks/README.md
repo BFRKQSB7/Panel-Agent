@@ -3,15 +3,15 @@
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
 CURRENT MILESTONE: M1 — Core 与控制闭环  
-RECOMMENDED NEXT TASK: [D02 — Panel、管理员认证与持久设置](D02-panel-admin-foundation.md)
+RECOMMENDED NEXT TASK: [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md)
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
 | Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
 |---|---|---|---|---|---|
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | PARTIAL | high | — | 单 Core v26.10.21 Reality/分 email 累计 Stats 与重启清零通过；4GB WSL 峰值 RSS 37,668 KiB；128MB WSL 创建失败 0x8007274c，已恢复配置。 |
-| [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | IN_PROGRESS | high | — | 接续独立任务；D01 的 128MB 缺口不阻断本项。 |
-| [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | WAITING | high | D02 | — |
+| [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
+| [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | READY | high | D02 | — |
 | [D04 — Reality 节点管理与单 Core 安全应用](D04-reality-apply-rollback.md) | M1 | WAITING | high | D01, D03 | — |
 | [D05 — 用户、组与实际代理权限](D05-users-groups-credentials.md) | M2 | WAITING | high | D04 | — |
 | [D06 — 双 Token、用户页与三类订阅](D06-dashboard-subscriptions.md) | M2 | WAITING | high | D05 | — |

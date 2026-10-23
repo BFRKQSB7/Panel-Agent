@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.SiteName}}</title>
+  <style>
+    body{font:16px system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1rem;color:#17202a}
+    form{display:grid;gap:.8rem;margin:1.5rem 0}input,button{font:inherit;padding:.7rem;border:1px solid #9aa4ad;border-radius:.35rem}
+    button{background:#17202a;color:white;cursor:pointer}.notice{color:#286342}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{.SiteName}}</h1>
+    {{if .Saved}}<p class="notice" role="status">设置已保存。</p>{{end}}
+    {{if .Error}}<p role="alert">{{.Error}}</p>{{end}}
+    <form method="post" action="/admin/settings">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="site_name">面板名称</label>
+      <input id="site_name" name="site_name" value="{{.SiteName}}" maxlength="64" required>
+      <button type="submit">保存设置</button>
+    </form>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button type="submit">退出登录</button>
+    </form>
+  </main>
+</body>
+</html>

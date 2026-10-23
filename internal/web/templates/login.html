@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel-Agent 管理登录</title>
+  <style>
+    body{font:16px system-ui,sans-serif;max-width:28rem;margin:12vh auto;padding:0 1rem;color:#17202a}
+    form{display:grid;gap:.9rem}input,button{font:inherit;padding:.7rem;border:1px solid #9aa4ad;border-radius:.35rem}
+    button{background:#17202a;color:white;cursor:pointer}.error{color:#9c2424}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Panel-Agent</h1>
+    <p>管理员登录</p>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <form method="post" action="/login" autocomplete="on">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="password">管理员口令</label>
+      <input id="password" name="password" type="password" minlength="12" maxlength="72" autocomplete="current-password" required autofocus>
+      <button type="submit">登录</button>
+    </form>
+  </main>
+</body>
+</html>
