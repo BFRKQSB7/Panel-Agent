@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
-	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
 )
 
@@ -83,46 +82,5 @@ func (s *identityStore) Save(identity Identity) error {
 	if err != nil {
 		return fmt.Errorf("encode Agent identity: %w", err)
 	}
-	temporaryToken, err := security.NewToken(16)
-	if err != nil {
-		return err
-	}
-	temporaryPath := s.path + "." + temporaryToken + ".tmp"
-	file, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("create temporary Agent identity: %w", err)
-	}
-	if _, err := file.Write(contents); err != nil {
-		_ = file.Close()
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("write Agent identity: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("sync Agent identity: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("close Agent identity: %w", err)
-	}
-	if err := os.Rename(temporaryPath, s.path); err != nil {
-		_ = os.Remove(temporaryPath)
-		return fmt.Errorf("replace Agent identity: %w", err)
-	}
-	if runtime.GOOS != "windows" {
-		directory, err := os.Open(s.dataDir)
-		if err != nil {
-			return fmt.Errorf("open Agent data directory: %w", err)
-		}
-		syncErr := directory.Sync()
-		closeErr := directory.Close()
-		if syncErr != nil {
-			return fmt.Errorf("sync Agent data directory: %w", syncErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close Agent data directory: %w", closeErr)
-		}
-	}
-	return nil
+	return storage.WritePrivateAtomic(s.path, contents)
 }

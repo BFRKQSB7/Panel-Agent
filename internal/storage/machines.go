@@ -53,6 +53,9 @@ type MachineRecord struct {
 	ReceivedDigest        string
 	AppliedRevision       uint64
 	AppliedDigest         string
+	AppliedAuthorityEpoch string
+	CoreGeneration        uint64
+	CoreInstanceID        string
 	ApplyError            string
 	PendingAuthorityEpoch string
 	PendingAuthorityNonce string
@@ -253,7 +256,11 @@ func (s *Store) RegisterMachine(ctx context.Context, input RegisterMachineInput,
 	if err != nil {
 		return MachineRecord{}, PanelAuthority{}, err
 	}
-	return machine, panelAuthority, nil
+	current, err := s.GetMachineDesiredState(ctx, machineID)
+	if err != nil {
+		return MachineRecord{}, PanelAuthority{}, err
+	}
+	return machine, current, nil
 }
 
 func displayName(name, hostname string) string {
@@ -291,7 +298,7 @@ const machineSelect = `SELECT machine_id, registration_id, token_hash, hostname,
 	cpu_count, memory_bytes, agent_version, authority_epoch, desired_revision, desired_digest,
 	received_revision, received_digest, applied_revision, applied_digest, apply_error,
 	pending_authority_epoch, pending_authority_nonce, last_authority_nonce, last_heartbeat_at,
-	revoked_at, created_at, updated_at FROM machines`
+	revoked_at, created_at, updated_at, applied_authority_epoch, core_generation, core_instance_id FROM machines`
 
 func (s *Store) GetMachine(ctx context.Context, machineID string) (MachineRecord, error) {
 	var machine MachineRecord
@@ -326,18 +333,19 @@ func (s *Store) ListMachines(ctx context.Context) ([]MachineRecord, error) {
 }
 
 func scanMachine(scanner rowScanner, machine *MachineRecord) error {
-	var cpuCount, memoryBytes, desiredRevision, receivedRevision, appliedRevision int64
+	var cpuCount, memoryBytes, desiredRevision, receivedRevision, appliedRevision, coreGeneration int64
 	var pendingEpoch, pendingNonce, lastNonce, heartbeat, revoked sql.NullString
 	err := scanner.Scan(
 		&machine.MachineID, &machine.RegistrationID, &machine.TokenHash, &machine.Hostname, &machine.DisplayName, &machine.Notes,
 		&machine.OS, &machine.Architecture, &cpuCount, &memoryBytes, &machine.AgentVersion, &machine.AuthorityEpoch,
 		&desiredRevision, &machine.DesiredDigest, &receivedRevision, &machine.ReceivedDigest, &appliedRevision, &machine.AppliedDigest,
 		&machine.ApplyError, &pendingEpoch, &pendingNonce, &lastNonce, &heartbeat, &revoked, &machine.CreatedAt, &machine.UpdatedAt,
+		&machine.AppliedAuthorityEpoch, &coreGeneration, &machine.CoreInstanceID,
 	)
 	if err != nil {
 		return err
 	}
-	if cpuCount < 0 || memoryBytes < 0 || desiredRevision < 1 || receivedRevision < 0 || appliedRevision < 0 {
+	if cpuCount < 0 || memoryBytes < 0 || desiredRevision < 1 || receivedRevision < 0 || appliedRevision < 0 || coreGeneration < 0 {
 		return errors.New("machine record contains invalid counters")
 	}
 	machine.CPUCount = int(cpuCount)
@@ -345,6 +353,7 @@ func scanMachine(scanner rowScanner, machine *MachineRecord) error {
 	machine.DesiredRevision = uint64(desiredRevision)
 	machine.ReceivedRevision = uint64(receivedRevision)
 	machine.AppliedRevision = uint64(appliedRevision)
+	machine.CoreGeneration = uint64(coreGeneration)
 	machine.PendingAuthorityEpoch = pendingEpoch.String
 	machine.PendingAuthorityNonce = pendingNonce.String
 	machine.LastAuthorityNonce = lastNonce.String
@@ -394,7 +403,7 @@ func (s *Store) DesiredStateExchange(ctx context.Context, machineID string, requ
 	if machine.Revoked {
 		return protocol.DesiredStateResponse{}, ErrMachineAuthentication
 	}
-	authority, err := readPanelAuthority(ctx, tx)
+	authority, err := s.machineDesiredTx(ctx, tx, machine)
 	if err != nil {
 		return protocol.DesiredStateResponse{}, err
 	}
@@ -496,7 +505,7 @@ func (s *Store) RecordMachineStatus(ctx context.Context, machineID string, reque
 	if machine.Revoked {
 		return "", ErrMachineAuthentication
 	}
-	authority, err := readPanelAuthority(ctx, tx)
+	authority, err := s.machineDesiredTx(ctx, tx, machine)
 	if err != nil {
 		return "", err
 	}
@@ -509,7 +518,7 @@ func (s *Store) RecordMachineStatus(ctx context.Context, machineID string, reque
 	if request.Digest != authority.Digest {
 		return "", ErrDigestMismatch
 	}
-	if request.Applied || request.AppliedRevision != 0 || request.AppliedDigest != "" {
+	if request.CoreGeneration == 0 && (request.Applied || request.AppliedRevision != 0 || request.AppliedDigest != "" || request.AppliedAuthorityEpoch != "" || request.CoreInstanceID != "") {
 		return "", ErrCoreNotImplemented
 	}
 	if !request.Received {
@@ -525,19 +534,38 @@ func (s *Store) RecordMachineStatus(ctx context.Context, machineID string, reque
 		return "", ErrDigestMismatch
 	}
 	applyError := request.ApplyError
-	if !request.Applied && applyError == "" {
+	if request.CoreGeneration == 0 && applyError == "" {
 		applyError = protocol.ErrorCoreNotImplemented
 	}
-	if applyError != "" && applyError != protocol.ErrorCoreNotImplemented {
+	if !protocol.IsCoreApplyError(applyError) {
 		return "", errors.New("unknown apply error code")
+	}
+	if request.CoreGeneration > 0 {
+		if request.CoreGeneration > 1<<63-1 || request.CoreGeneration < machine.CoreGeneration || !security.IsUUIDv4(request.CoreInstanceID) ||
+			(request.CoreGeneration == machine.CoreGeneration && request.CoreInstanceID != machine.CoreInstanceID) {
+			return "", ErrStaleRevision
+		}
+		if request.AppliedRevision != 0 {
+			if !security.IsUUIDv4(request.AppliedAuthorityEpoch) || !security.IsValidDigest(request.AppliedDigest) || request.AppliedRevision > 1<<63-1 {
+				return "", ErrDigestMismatch
+			}
+		} else if request.AppliedAuthorityEpoch != "" || request.AppliedDigest != "" {
+			return "", ErrDigestMismatch
+		}
+		if request.Applied && (applyError != "" || request.AppliedAuthorityEpoch != request.AuthorityEpoch || request.AppliedRevision != request.Revision || request.AppliedDigest != request.Digest) {
+			return "", ErrDigestMismatch
+		}
+		machine.AppliedAuthorityEpoch, machine.AppliedRevision, machine.AppliedDigest = request.AppliedAuthorityEpoch, request.AppliedRevision, request.AppliedDigest
+		machine.CoreGeneration, machine.CoreInstanceID = request.CoreGeneration, request.CoreInstanceID
 	}
 	nowText := now.UTC().Format(time.RFC3339Nano)
 	_, err = tx.ExecContext(ctx, `UPDATE machines SET hostname = ?, display_name = CASE WHEN ? = '' THEN display_name ELSE ? END,
 		os = ?, architecture = ?, cpu_count = ?, memory_bytes = ?, agent_version = ?, received_revision = ?,
-		received_digest = ?, apply_error = ?, last_heartbeat_at = ?, updated_at = ? WHERE machine_id = ?`,
+		received_digest = ?, apply_error = ?, last_heartbeat_at = ?, updated_at = ?,
+		applied_authority_epoch = ?, applied_revision = ?, applied_digest = ?, core_generation = ?, core_instance_id = ? WHERE machine_id = ?`,
 		request.Hostname, request.DisplayName, strings.TrimSpace(request.DisplayName), request.OS, request.Architecture,
 		request.CPUCount, request.MemoryBytes, request.AgentVersion, request.Revision, request.Digest, applyError,
-		nowText, nowText, machineID)
+		nowText, nowText, machine.AppliedAuthorityEpoch, machine.AppliedRevision, machine.AppliedDigest, machine.CoreGeneration, machine.CoreInstanceID, machineID)
 	if err != nil {
 		return "", fmt.Errorf("persist machine status: %w", err)
 	}
@@ -554,5 +582,6 @@ func MachineViewFromRecord(record MachineRecord) protocol.MachineView {
 		AgentVersion: record.AgentVersion, AuthorityEpoch: record.AuthorityEpoch, DesiredRevision: record.DesiredRevision,
 		ReceivedRevision: record.ReceivedRevision, ReceivedDigest: record.ReceivedDigest, AppliedRevision: record.AppliedRevision,
 		AppliedDigest: record.AppliedDigest, ApplyError: record.ApplyError, LastHeartbeat: record.LastHeartbeatAt, Revoked: record.Revoked,
+		AppliedAuthorityEpoch: record.AppliedAuthorityEpoch, CoreGeneration: record.CoreGeneration, CoreInstanceID: record.CoreInstanceID,
 	}
 }

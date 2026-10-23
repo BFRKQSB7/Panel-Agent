@@ -1,0 +1,58 @@
+{
+  "task": "D04",
+  "host": "iceland-W8eRiY",
+  "passed": true,
+  "checks": {
+    "real_core_fault_suite": "PASS",
+    "three_nodes_one_core": "PASS",
+    "unchanged_snapshot": "PASS",
+    "metadata_without_restart": "PASS",
+    "panel_offline_service": "PASS",
+    "agent_killed_before_health_offline_rollback": "PASS",
+    "revocation": {
+      "existing_tcp_closed": true,
+      "existing_udp_closed": true,
+      "other_node_tcp_interrupted": true,
+      "other_nodes_reconnect": true,
+      "old_mapping_retained": true,
+      "boundary_count": 3,
+      "observed_uplink": 268,
+      "observed_downlink": 1068,
+      "unobserved_tail_explicit": true
+    },
+    "panel_local_agent": "PASS"
+  },
+  "resources": {
+    "system_samples": 11607,
+    "system_peak_bytes": 103399424,
+    "check_samples": 5,
+    "check_sampled_hwm_kib": 17756,
+    "run_samples": 8324,
+    "run_sampled_hwm_kib": 24728
+  },
+  "cleanup": "PASS",
+  "date_utc": "2026-10-23",
+  "environment": {
+    "os": "Alpine 3.23.4",
+    "architecture": "amd64",
+    "xray": "26.10.21",
+    "memory_limit_bytes": 134217728,
+    "swap_limit_bytes": 134217728,
+    "shared_host_kernel": true,
+    "sampling_interval_seconds": 0.01,
+    "resource_scope": "Whole guest root cgroup, including existing OS services and benchmark processes; sampled peak, not an instantaneous guarantee"
+  },
+  "evidence_scope": "Isolated loopback targets through actual Windows Reality clients and the same Linux Panel/Agent route; no public NAT, installation, upgrade, or release acceptance",
+  "stats_note": "Retained cumulative observations contain old Node mappings and explicit sampling-to-stop gaps; sample counter values are observations, not billable totals",
+  "tested_binary_sha256": {
+    "d04-control": "7abdfae1fdb9f471e8c69bc99c3ecc7e07518068fdb369a96a8df551ec87dc7b",
+    "d04-agent": "8cb3b901484ba4d8d06ff3e3627384f21e87a7c28618e0defe83a72f77553dea",
+    "d04-core-tests": "4ade6c5f677873a2858ab7f51dd98775548803f38944736c5ce71c66cb5a834c",
+    "d04-http-target": "053f43d52207920f4ce193fd1f4543221824580f508be060f408470c7d8f9ffe"
+  },
+  "regression": {
+    "d03_https_process_smoke": "PASS",
+    "targeted_go_packages": "PASS",
+    "full_release_regression": false
+  }
+}

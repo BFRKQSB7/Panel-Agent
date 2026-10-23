@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +33,20 @@ func run() error {
 	port := flag.Int("port", 22, "SSH port")
 	identity := flag.String("identity", "", "private key path")
 	hosts := flag.String("known-hosts", "", "existing known_hosts path")
+	ports := flag.String("ports", "10085,18443,18444", "comma-separated local/remote loopback ports")
+	helper := flag.String("remote-helper", "", "optional absolute benchmark helper for prompt remote EOF propagation")
 	flag.Parse()
+	if *helper != "" && (!strings.HasPrefix(*helper, "/tmp/panel-agent-d04-") || !regexp.MustCompile(`^/[a-zA-Z0-9_./-]+$`).MatchString(*helper)) {
+		return errors.New("remote helper must be an isolated benchmark path")
+	}
+	var relayPorts []int
+	for _, value := range strings.Split(*ports, ",") {
+		port, err := strconv.Atoi(value)
+		if err != nil || port < 1 || port > 65535 {
+			return errors.New("invalid relay port")
+		}
+		relayPorts = append(relayPorts, port)
+	}
 	user, host, ok := strings.Cut(*destination, "@")
 	if !ok || user == "" || host == "" || *port < 1 || *port > 65535 || flag.NArg() != 0 {
 		return errors.New("destination and a valid port are required")
@@ -74,7 +88,7 @@ func run() error {
 			_ = listener.Close()
 		}
 	}()
-	for _, localPort := range []int{10085, 18443, 18444} {
+	for _, localPort := range relayPorts {
 		listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
 		if err != nil {
 			return err
@@ -84,7 +98,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	var sessions sync.WaitGroup
-	for i, localPort := range []int{10085, 18443, 18444} {
+	for i, localPort := range relayPorts {
 		listener := listeners[i]
 		sessions.Add(1)
 		go func() {
@@ -97,7 +111,7 @@ func run() error {
 				sessions.Add(1)
 				go func() {
 					defer sessions.Done()
-					if err := relay(client, conn, localPort); err != nil {
+					if err := relay(client, conn, localPort, *helper); err != nil {
 						log.Printf("relay port %d: %v", localPort, err)
 					}
 				}()
@@ -120,7 +134,7 @@ func run() error {
 	return nil
 }
 
-func relay(client *ssh.Client, conn net.Conn, port int) error {
+func relay(client *ssh.Client, conn net.Conn, port int, helper string) error {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(45 * time.Second))
 	session, err := client.NewSession()
@@ -138,7 +152,11 @@ func relay(client *ssh.Client, conn net.Conn, port int) error {
 	}
 	session.Stderr = os.Stderr
 	// The port is an internal integer from the fixed listener set.
-	if err := session.Start(fmt.Sprintf("exec nc -w 30 127.0.0.1 %d", port)); err != nil {
+	command := fmt.Sprintf("exec nc -w 30 127.0.0.1 %d", port)
+	if helper != "" {
+		command = fmt.Sprintf("exec '%s' --relay 127.0.0.1:%d", helper, port)
+	}
+	if err := session.Start(command); err != nil {
 		return err
 	}
 	go func() {

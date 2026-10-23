@@ -31,6 +31,7 @@
     <article>
       <h2>{{.DisplayName}}</h2>
       <p>机器 ID：<code>{{.MachineID}}</code></p>
+      <p><a href="/admin/machines/{{.MachineID}}/nodes">管理 Reality 节点</a></p>
       <p>机器 authority：<code>{{.AuthorityEpoch}}</code>；目标 revision：{{.DesiredRevision}}；收到 digest：<code>{{.ReceivedDigest}}</code></p>
       <p>主机名：{{.Hostname}}；系统：{{.OS}} / {{.Architecture}}；CPU：{{.CPUCount}}；内存：{{if .MemoryBytes}}{{.MemoryBytes}} 字节{{else}}未知{{end}}；Agent：{{.AgentVersion}}</p>
       <p>最近心跳：{{if .LastHeartbeat}}{{.LastHeartbeat}}{{else}}尚未收到{{end}}；收到 revision：{{.ReceivedRevision}}；应用 revision：{{.AppliedRevision}}；状态：{{if .Revoked}}已吊销{{else}}有效{{end}} {{if .ApplyError}}（{{.ApplyError}}）{{end}}</p>

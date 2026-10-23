@@ -297,7 +297,7 @@ func (s *Server) machineRegistrationResponse(r *http.Request, machine storage.Ma
 		MachineID: machine.MachineID, RegistrationID: machine.RegistrationID,
 		AuthorityEpoch: machine.AuthorityEpoch, Revision: machine.DesiredRevision, Digest: machine.DesiredDigest,
 	}
-	current, err := s.store.GetPanelAuthority(r.Context())
+	current, err := s.store.GetMachineDesiredState(r.Context(), machine.MachineID)
 	if err != nil {
 		return protocol.RegisterResponse{}, err
 	}

@@ -22,6 +22,25 @@ These are process **VmHWM** and guest **/proc/meminfo** readings from the defaul
 
 The smoke validates a local HTTP destination through the real Reality proxy and local counters. It does not establish unrestricted public Internet egress or production-port behavior.
 
+## D04 节点与安全应用 smoke
+
+`run-d04-smoke.ps1` 在指定 Linux 测试机的独立 `/tmp/panel-agent-d04-*` 目录运行真实 Panel、同机 Agent 和唯一受管 Xray Core，Windows 运行真实 Xray 客户端。需要已由 D01 校验的 Linux/Windows Xray 26.10.21 缓存、Go、PowerShell 7、OpenSSH、`tar.exe` 和 `curl.exe`；沿用上方玩具冰岛的身份和密钥变量：
+
+```powershell
+pwsh -NoProfile -File .\bench\run-d04-smoke.ps1 `
+  -SshDestination root@194.247.182.108 -SshPort 45000 `
+  -SshIdentityFile $keyPath -SshKnownHostsFile $knownHostsPath `
+  -ExpectedHostname iceland-W8eRiY -ExpectedIPv4 10.88.234.165
+```
+
+该 smoke 从真实 HTTPS 管理表单创建三个 Node，核对机器的 applied 状态、共享开发 UUID 与独立统计映射，验证三个 Reality 入口代理、无变化和元数据变更不重启、Panel 失联继续服务、健康确认前杀掉 Agent 后离线恢复，以及撤销已有 TCP/UDP 会话。同机其他 Node 的 TCP 会话也会因完整 Core 重启中断，测试随后验证它们可以重新连接。Linux opt-in 故障套件使用真实固定版 Core 验证坏配置、端口占用、预检查后端口被抢占导致的启动失败和各持久应用阶段恢复；未指定 `PANEL_AGENT_TEST_XRAY` 时常规 Go 测试不会假装运行这套真实 Core 测试。
+
+固定版 Freedom 默认阻止服务端代理访问私网/回环地址。smoke 显式传 `--development-loopback-test`，仅为纯开发凭证 Node 放行 TCP `127.0.0.1:18080` 和 UDP `127.0.0.1:18081`，默认生产配置无此例外。管理 HTTPS、Stats 和 Reality 监听都在远端回环，Windows 通过严格校验既有 ED25519 主机密钥的 SSH exec 字节中继访问；D04 使用同一个测试目标程序的 stdio 中继模式及时传递远端 TCP EOF，D01 默认仍使用已有 `nc`。不修改 SSH、NAT、防火墙或现有 FilePanel/nginx。Windows 对这个隔离回环管理入口接受临时自签证书，Agent 则通过生成的 PEM 校验服务端证书。
+
+测试读取根 cgroup 内存、OOM 计数和 Xray `VmHWM`。配置检查进程很短，报告的是成功采到的 HWM 和样本数，不把轮询样本冒充无遗漏的瞬时峰值。每次运行的结果、私有测试凭证、诊断和构建缓存保存在忽略目录 `bench/.work/d04-*`；远端按专属目录与进程身份停止，比较原服务 PID/命令行及监听，并清理隔离目录。原服务变化、残留监听或 OOM 都会使 smoke 失败。
+
+2026-10-23 的完整实测通过，见 [d04-iceland.json](results/d04-iceland.json)。三个入口真实代理成功，未变化与元数据修改不重启；Panel 离线继续服务，健康确认前杀掉 Agent 后离线恢复原配置。撤销节点的已有 TCP/UDP 会话结束，同机其他节点的已有 TCP 也中断，随后重新连接成功；保留了旧映射、非零累计观察和不可观测尾部。11,607 个整机样本最大 103,399,424 字节（约 98.6MiB）；配置检查采到 5 个 HWM 样本、最大 17,756 KiB，受管 Core 运行样本 HWM 最大 24,728 KiB。OOM 计数保持零，原服务 PID/监听及清理检查通过；D03 HTTPS 进程 smoke 与相关 Go 测试通过。该结果不代替 D17 完整发布资源验收。
+
 ## 指定 VPS 的 SSH 模式
 
 用户指定的测试机为 VPS 项目中的 `servers/LazyCatCloud-玩具冰岛`，对应 SSH `194.247.182.108:45000`、主机名 `iceland-W8eRiY`、内网 `10.88.234.165`。连接材料沿用该机器目录中的独立维护密钥和 `known_hosts`，不复制到本仓库；不能与 SSH 45100 的另一冰岛实例混用。以下路径变量应指向上述现有文件：

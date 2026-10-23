@@ -89,3 +89,17 @@ func (c *StatsClient) Close() error {
 	}
 	return c.conn.Close()
 }
+
+func (c *StatsClient) Uptime(ctx context.Context) (uint64, error) {
+	if c == nil || c.service == nil || ctx == nil {
+		return 0, errors.New("xray stats: invalid health client or context")
+	}
+	response, err := c.service.GetSysStats(ctx, &command.SysStatsRequest{})
+	if err != nil {
+		return 0, fmt.Errorf("xray health: %w", err)
+	}
+	if response == nil {
+		return 0, errors.New("xray health: empty system stats")
+	}
+	return uint64(response.Uptime), nil
+}

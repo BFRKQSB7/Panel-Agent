@@ -2,8 +2,8 @@
 
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
-CURRENT MILESTONE: M1 — Core 与控制闭环  
-RECOMMENDED NEXT TASK: [D04 — Reality 节点管理与单 Core 安全应用](D04-reality-apply-rollback.md)
+CURRENT MILESTONE: M2 — 用户与订阅
+RECOMMENDED NEXT TASK: [D05 — 用户、组与实际代理权限](D05-users-groups-credentials.md)
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
@@ -12,8 +12,8 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | DONE | high | — | 指定且获用户接受的玩具冰岛 128MiB 整机容器 smoke 通过：16 次 Reality 请求/分入口累计 Stats/重启清零；系统采样峰值 64.1MiB，OOM 零，原服务保留；WSL 回归通过。 |
 | [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |
-| [D04 — Reality 节点管理与单 Core 安全应用](D04-reality-apply-rollback.md) | M1 | READY | high | D01, D03 | D01/D03 已完成，可执行。 |
-| [D05 — 用户、组与实际代理权限](D05-users-groups-credentials.md) | M2 | WAITING | high | D04 | — |
+| [D04 — Reality 节点管理与单 Core 安全应用](D04-reality-apply-rollback.md) | M1 | DONE | high | D01, D03 | Node 表单/隔离快照/加密密钥、串行应用与持久恢复完成；玩具冰岛三入口单 Core、故障回滚、离线恢复、已有 TCP/UDP 撤销通过；整机采样峰值 98.6MiB、OOM 零，原服务保留；D03 回归通过。 |
+| [D05 — 用户、组与实际代理权限](D05-users-groups-credentials.md) | M2 | READY | high | D04 | — |
 | [D06 — 双 Token、用户页与三类订阅](D06-dashboard-subscriptions.md) | M2 | WAITING | high | D05 | — |
 | [D07 — 独立周期规则与可执行边界样例](D07-period-policy-contract.md) | M3 | WAITING | high | D05 | — |
 | [D08 — Agent 持久采样、累计账本与重启恢复](D08-agent-durable-ledger.md) | M3 | WAITING | max | D07 | — |
@@ -22,7 +22,7 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 | [D11 — 隐藏 Exit、一跳转发与扣账归属](D11-one-hop-exit.md) | M4 | WAITING | high | D10 | — |
 | [D12 — 动态 NAT/DNS 教程与有限连通性检查](D12-nat-dns-guidance.md) | M4 | WAITING | high | D06 | — |
 | [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md) | M4 | WAITING | high | D06 | — |
-| [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md) | M5 | WAITING | high | D04 | — |
+| [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md) | M5 | READY | high | D04 | — |
 | [D15 — 手动 Core 升级与 CLI 更新回滚](D15-manual-upgrade-rollback.md) | M5 | WAITING | max | D16 | — |
 | [D16 — 一致性备份、恢复与 Agent 重连](D16-backup-restore-reconcile.md) | M5 | WAITING | max | D09, D13, D14 | — |
 | [D17 — 完整发布回归与资源验收](D17-release-resource-gate.md) | M5 | WAITING | high | D11, D12, D15 | — |

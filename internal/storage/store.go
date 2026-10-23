@@ -26,7 +26,8 @@ import (
 var migrationFiles embed.FS
 
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	masterKey []byte
 }
 
 type Settings struct {
@@ -37,6 +38,10 @@ func Open(dataDir string) (*Store, error) {
 	databasePath, err := filepath.Abs(filepath.Join(dataDir, DatabaseFileName))
 	if err != nil {
 		return nil, fmt.Errorf("resolve SQLite database path: %w", err)
+	}
+	masterKey, err := security.LoadOrCreateMasterKey(dataDir, databasePath)
+	if err != nil {
+		return nil, err
 	}
 	uriPath := filepath.ToSlash(databasePath)
 	if runtime.GOOS == "windows" && len(uriPath) >= 2 && uriPath[1] == ':' {
@@ -66,7 +71,7 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	store := &Store{db: db}
+	store := &Store{db: db, masterKey: masterKey}
 	if err := store.ensurePanelAuthority(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -181,7 +186,9 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	return s.db.Close()
+	err := s.db.Close()
+	clear(s.masterKey)
+	return err
 }
 
 func (s *Store) HasAdmin(ctx context.Context) (bool, error) {

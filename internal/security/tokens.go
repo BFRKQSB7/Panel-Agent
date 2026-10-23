@@ -6,9 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 )
 
 const MachineSecretBytes = 32
+
+var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func IsUUIDv4(value string) bool { return uuidV4Pattern.MatchString(value) }
 
 func NewToken(size int) (string, error) {
 	if size < 16 || size > 128 {

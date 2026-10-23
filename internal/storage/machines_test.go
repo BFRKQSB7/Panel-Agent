@@ -154,6 +154,55 @@ func openMachineTestStore(t *testing.T) *Store {
 	return store
 }
 
+func TestCoreStatusKeepsGenerationSeparateFromAuthority(t *testing.T) {
+	store := openMachineTestStore(t)
+	ctx, now := context.Background(), time.Now().UTC()
+	join, candidate, registrationID := testSecrets(t)
+	if err := store.CreateJoinToken(ctx, security.HashToken(join), "", now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	machine, authority, err := store.RegisterMachine(ctx, testRegistration(join, candidate, registrationID), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, _ := security.NewUUID()
+	request := protocol.StatusRequest{AuthorityEpoch: authority.Epoch, Revision: authority.Revision, Digest: authority.Digest, Received: true,
+		Applied: true, AppliedAuthorityEpoch: authority.Epoch, AppliedRevision: authority.Revision, AppliedDigest: authority.Digest, CoreGeneration: 2, CoreInstanceID: instance}
+	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); err != nil {
+		t.Fatal(err)
+	}
+	request.CoreGeneration = 1
+	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); !errors.Is(err, ErrStaleRevision) {
+		t.Fatalf("generation rollback: %v", err)
+	}
+	request.CoreGeneration = 2
+	request.CoreInstanceID, _ = security.NewUUID()
+	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); !errors.Is(err, ErrStaleRevision) {
+		t.Fatalf("same generation with different process: %v", err)
+	}
+	newAuthority, err := store.RotatePanelAuthority(ctx, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := store.DesiredStateExchange(ctx, machine.MachineID, protocol.DesiredStateRequest{AuthorityEpoch: authority.Epoch, Revision: authority.Revision, Digest: authority.Digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.DesiredStateExchange(ctx, machine.MachineID, protocol.DesiredStateRequest{AuthorityEpoch: newAuthority.Epoch, Revision: newAuthority.Revision, Digest: newAuthority.Digest, AuthorityNonce: challenge.AuthorityNonce, FullSnapshotReceived: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AuthorityEpoch, request.Revision, request.Digest = newAuthority.Epoch, newAuthority.Revision, newAuthority.Digest
+	request.CoreGeneration, request.CoreInstanceID, request.Applied, request.ApplyError = 3, instance, false, protocol.ErrorCoreHealthFailed
+	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetMachine(ctx, machine.MachineID)
+	if err != nil || stored.AuthorityEpoch != newAuthority.Epoch || stored.AppliedAuthorityEpoch != authority.Epoch || stored.CoreGeneration != 3 || stored.ApplyError != protocol.ErrorCoreHealthFailed {
+		t.Fatalf("failed authority candidate overwrote previous applied scope: %v", err)
+	}
+}
+
 func testSecrets(t *testing.T) (join, candidate, registration string) {
 	t.Helper()
 	var err error

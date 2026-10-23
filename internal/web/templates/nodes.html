@@ -1,0 +1,61 @@
+{{define "node-fields"}}
+<label>名称 <input name="name" value="{{.Name}}" maxlength="128" required></label>
+<label>公网主机 <input name="public_host" value="{{.PublicHost}}" placeholder="IP 或域名" required></label>
+<label>公网端口 <input type="number" name="public_port" value="{{if .PublicPort}}{{.PublicPort}}{{end}}" min="1" max="65535" required></label>
+<label>监听 IP <input name="listen_host" value="{{.ListenHost}}" required></label>
+<label>监听端口 <input type="number" name="listen_port" value="{{if .ListenPort}}{{.ListenPort}}{{end}}" min="1" max="65535" required></label>
+<label>Reality SNI <input name="server_name" value="{{.ServerName}}" required></label>
+<label>Reality 目标 <input name="target" value="{{.Target}}" placeholder="主机:端口" required></label>
+<label><input type="checkbox" name="enabled" value="true" {{if .Enabled}}checked{{end}}>启用节点</label>
+<label class="development"><input type="checkbox" name="development" value="true" {{if .Development}}checked{{end}}>启用开发凭证，仅用于隔离测试</label>
+{{end}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reality 节点</title>
+  <style>
+    body{font:16px system-ui,sans-serif;max-width:64rem;margin:3rem auto;padding:0 1rem;color:#17202a}
+    article,section{border:1px solid #9aa4ad;border-radius:.5rem;padding:1rem;margin:1rem 0}
+    form.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem}
+    label{display:flex;flex-direction:column;gap:.4rem}input,button{font:inherit;padding:.55rem;border:1px solid #9aa4ad;border-radius:.3rem;min-width:0}
+    label:has([type=checkbox]){display:block}button{background:#17202a;color:white;cursor:pointer}.danger{background:#8f2424}
+    code{overflow-wrap:anywhere}.muted{color:#58636d}.development{color:#8f2424}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{.Machine.DisplayName}} · Reality 节点</h1>
+    <p><a href="/admin/machines">返回机器管理</a></p>
+    <p>目标 revision：{{.Machine.DesiredRevision}}；已接收：{{.Machine.ReceivedRevision}}；已应用：{{.Machine.AppliedRevision}}。{{if .Machine.ApplyError}}应用状态：{{.Machine.ApplyError}}。{{end}}</p>
+	<p>Core generation：{{.Machine.CoreGeneration}}；应用 authority：<code>{{.Machine.AppliedAuthorityEpoch}}</code></p>
+    <p class="muted">公网主机和内外端口均由管理员录入；这些值不代表 NAT 映射已验证。所有启用节点由本机同一个 Core 承载，变更配置时现有连接可能短暂中断。</p>
+    <section>
+      <h2>新建节点</h2>
+      <p>Reality 密钥和 Short ID 自动生成。开发凭证默认关闭，请仅在隔离测试时启用。</p>
+      <form class="fields" method="post" action="/admin/machines/{{.Machine.MachineID}}/nodes">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        {{template "node-fields" .NewNode}}
+        <button type="submit">创建节点</button>
+      </form>
+    </section>
+    {{range .Nodes}}
+    <article>
+      <h2>{{.Name}}</h2>
+      <p>节点 ID：<code>{{.NodeID}}</code>；公钥：<code>{{.PublicKey}}</code>；Short ID：<code>{{.ShortID}}</code></p>
+      {{if .Development}}<p class="development">此节点启用了开发凭证，测试 UUID：<code>{{.DevelopmentUUID}}</code>。测试完成后关闭该选项。</p>{{end}}
+      <form class="fields" method="post" action="/admin/machines/{{$.Machine.MachineID}}/nodes/{{.NodeID}}">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        {{template "node-fields" .NodeInput}}
+        <button type="submit">保存节点</button>
+      </form>
+      <form method="post" action="/admin/machines/{{$.Machine.MachineID}}/nodes/{{.NodeID}}/delete">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <p><button class="danger" type="submit">删除节点</button></p>
+      </form>
+    </article>
+    {{end}}
+  </main>
+</body>
+</html>

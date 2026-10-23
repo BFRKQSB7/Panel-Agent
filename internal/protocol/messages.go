@@ -33,7 +33,34 @@ type ErrorDetails struct {
 	Message string `json:"message"`
 }
 
-type DesiredNode struct{}
+const CoreStatsPort = 10085
+
+type DesiredNode struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	PublicHost  string            `json:"public_host"`
+	PublicPort  int               `json:"public_port"`
+	ListenHost  string            `json:"listen_host"`
+	ListenPort  int               `json:"listen_port"`
+	Enabled     bool              `json:"enabled"`
+	Reality     RealityConfig     `json:"reality"`
+	Credentials []ProxyCredential `json:"credentials"`
+}
+
+type RealityConfig struct {
+	ServerName string `json:"server_name"`
+	Target     string `json:"target"`
+	PrivateKey string `json:"private_key"`
+	PublicKey  string `json:"public_key"`
+	ShortID    string `json:"short_id"`
+}
+
+type ProxyCredential struct {
+	UserID      string `json:"user_id"`
+	UUID        string `json:"uuid"`
+	Email       string `json:"email"`
+	Development bool   `json:"development"`
+}
 
 type DesiredState struct {
 	Nodes []DesiredNode `json:"nodes"`
@@ -88,22 +115,25 @@ type DesiredStateResponse struct {
 }
 
 type StatusRequest struct {
-	RequestID       string `json:"request_id"`
-	AuthorityEpoch  string `json:"authority_epoch"`
-	Revision        uint64 `json:"revision"`
-	Digest          string `json:"digest"`
-	Hostname        string `json:"hostname"`
-	DisplayName     string `json:"display_name,omitempty"`
-	OS              string `json:"os"`
-	Architecture    string `json:"architecture"`
-	CPUCount        int    `json:"cpu_count"`
-	MemoryBytes     uint64 `json:"memory_bytes"`
-	AgentVersion    string `json:"agent_version"`
-	Received        bool   `json:"received"`
-	Applied         bool   `json:"applied"`
-	AppliedRevision uint64 `json:"applied_revision,omitempty"`
-	AppliedDigest   string `json:"applied_digest,omitempty"`
-	ApplyError      string `json:"apply_error,omitempty"`
+	RequestID             string `json:"request_id"`
+	AuthorityEpoch        string `json:"authority_epoch"`
+	Revision              uint64 `json:"revision"`
+	Digest                string `json:"digest"`
+	Hostname              string `json:"hostname"`
+	DisplayName           string `json:"display_name,omitempty"`
+	OS                    string `json:"os"`
+	Architecture          string `json:"architecture"`
+	CPUCount              int    `json:"cpu_count"`
+	MemoryBytes           uint64 `json:"memory_bytes"`
+	AgentVersion          string `json:"agent_version"`
+	Received              bool   `json:"received"`
+	Applied               bool   `json:"applied"`
+	AppliedRevision       uint64 `json:"applied_revision,omitempty"`
+	AppliedDigest         string `json:"applied_digest,omitempty"`
+	ApplyError            string `json:"apply_error,omitempty"`
+	AppliedAuthorityEpoch string `json:"applied_authority_epoch,omitempty"`
+	CoreGeneration        uint64 `json:"core_generation,omitempty"`
+	CoreInstanceID        string `json:"core_instance_id,omitempty"`
 }
 
 type StatusResponse struct {
@@ -117,24 +147,27 @@ type JoinTokenResponse struct {
 }
 
 type MachineView struct {
-	MachineID        string `json:"machine_id"`
-	Hostname         string `json:"hostname"`
-	DisplayName      string `json:"display_name"`
-	Notes            string `json:"notes"`
-	OS               string `json:"os"`
-	Architecture     string `json:"architecture"`
-	CPUCount         int    `json:"cpu_count"`
-	MemoryBytes      uint64 `json:"memory_bytes"`
-	AgentVersion     string `json:"agent_version"`
-	AuthorityEpoch   string `json:"authority_epoch"`
-	DesiredRevision  uint64 `json:"desired_revision"`
-	ReceivedRevision uint64 `json:"received_revision"`
-	ReceivedDigest   string `json:"received_digest"`
-	AppliedRevision  uint64 `json:"applied_revision"`
-	AppliedDigest    string `json:"applied_digest"`
-	ApplyError       string `json:"apply_error"`
-	LastHeartbeat    string `json:"last_heartbeat,omitempty"`
-	Revoked          bool   `json:"revoked"`
+	MachineID             string `json:"machine_id"`
+	Hostname              string `json:"hostname"`
+	DisplayName           string `json:"display_name"`
+	Notes                 string `json:"notes"`
+	OS                    string `json:"os"`
+	Architecture          string `json:"architecture"`
+	CPUCount              int    `json:"cpu_count"`
+	MemoryBytes           uint64 `json:"memory_bytes"`
+	AgentVersion          string `json:"agent_version"`
+	AuthorityEpoch        string `json:"authority_epoch"`
+	DesiredRevision       uint64 `json:"desired_revision"`
+	ReceivedRevision      uint64 `json:"received_revision"`
+	ReceivedDigest        string `json:"received_digest"`
+	AppliedRevision       uint64 `json:"applied_revision"`
+	AppliedDigest         string `json:"applied_digest"`
+	ApplyError            string `json:"apply_error"`
+	AppliedAuthorityEpoch string `json:"applied_authority_epoch"`
+	CoreGeneration        uint64 `json:"core_generation"`
+	CoreInstanceID        string `json:"core_instance_id"`
+	LastHeartbeat         string `json:"last_heartbeat,omitempty"`
+	Revoked               bool   `json:"revoked"`
 }
 
 func EmptyDesiredState() DesiredState {

@@ -123,18 +123,29 @@ func runSync(args []string) error {
 	flags.SetOutput(io.Discard)
 	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
 	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
+	xrayPath := flags.String("xray-path", "", "absolute path to the verified Xray 26.10.21 binary")
+	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		return errors.New("用法：control-agent sync [--data-dir PATH] [--ca-cert PEM]")
+		return errors.New("用法：control-agent sync [--data-dir PATH] [--ca-cert PEM] [--xray-path PATH]")
 	}
 	client, err := agent.LoadClient(*dataDir, *caCert)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
+	if *xrayPath != "" {
+		if err := client.EnableCore(context.Background(), *xrayPath, *developmentLoopback); err != nil {
+			return err
+		}
+	}
 	if err := client.SyncOnce(context.Background()); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stdout, "已同步完整 desired-state 快照并回报机器状态；Core 尚未实现，未报告 applied 成功。")
+	if *xrayPath == "" {
+		fmt.Fprintln(os.Stdout, "已同步配置并上报状态；未启用 Core 管理，未报告 applied 成功。")
+	} else {
+		fmt.Fprintln(os.Stdout, "已同步配置、完成 Core 应用与健康检查并上报状态。")
+	}
 	return nil
 }
 
@@ -143,8 +154,10 @@ func runAgent(args []string) error {
 	flags.SetOutput(io.Discard)
 	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
 	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
+	xrayPath := flags.String("xray-path", "", "absolute path to the verified Xray 26.10.21 binary")
+	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		return errors.New("用法：control-agent run [--data-dir PATH] [--ca-cert PEM]")
+		return errors.New("用法：control-agent run [--data-dir PATH] [--ca-cert PEM] [--xray-path PATH]")
 	}
 	client, err := agent.LoadClient(*dataDir, *caCert)
 	if err != nil {
@@ -153,6 +166,11 @@ func runAgent(args []string) error {
 	defer client.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if *xrayPath != "" {
+		if err := client.EnableCore(ctx, *xrayPath, *developmentLoopback); err != nil {
+			return err
+		}
+	}
 	if err := client.Run(ctx); errors.Is(err, context.Canceled) {
 		return nil
 	} else {

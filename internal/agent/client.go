@@ -34,6 +34,7 @@ type Client struct {
 	httpClient  *http.Client
 	syncMu      sync.Mutex
 	processLock *storage.ProcessLock
+	core        *CoreManager
 }
 
 type APIError struct {
@@ -93,6 +94,22 @@ func (c *Client) Close() {
 
 func (c *Client) Identity() Identity {
 	return c.identity
+}
+
+// EnableCore recovers the local Current/LKG before contacting Panel, so a
+// disconnected Agent can restore service using its persisted configuration.
+func (c *Client) EnableCore(ctx context.Context, binaryPath string, developmentLoopback bool) error {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	if c.core != nil {
+		return errors.New("Core manager is already enabled")
+	}
+	manager, err := NewCoreManager(c.store.dataDir, binaryPath, developmentLoopback)
+	if err != nil {
+		return err
+	}
+	c.core = manager
+	return manager.Recover(ctx)
 }
 
 func (c *Client) CompletePairing(ctx context.Context) error {
@@ -243,7 +260,12 @@ func (c *Client) SyncOnce(ctx context.Context) error {
 		if err := c.store.Save(c.identity); err != nil {
 			return err
 		}
-		return c.reportStatus(ctx)
+		var applyErr error
+		if c.core != nil {
+			applyErr = c.core.Apply(ctx, c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest, c.identity.DesiredState)
+		}
+		statusErr := c.reportStatus(ctx)
+		return errors.Join(applyErr, statusErr)
 	}
 	return errors.New("Panel authority changed repeatedly during the sync sequence")
 }
@@ -268,6 +290,16 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		Received:       true,
 		Applied:        false,
 		ApplyError:     protocol.ErrorCoreNotImplemented,
+	}
+	if c.core != nil {
+		status := c.core.Status()
+		request.CoreGeneration, request.CoreInstanceID = status.Generation, status.InstanceID
+		request.AppliedAuthorityEpoch, request.AppliedRevision, request.AppliedDigest = status.AuthorityEpoch, status.Revision, status.Digest
+		request.Applied = status.Running && status.AuthorityEpoch == c.identity.AuthorityEpoch && status.Revision == c.identity.Revision && status.Digest == c.identity.Digest
+		request.ApplyError = status.Error
+		if !request.Applied && request.ApplyError == "" {
+			request.ApplyError = protocol.ErrorCorePending
+		}
 	}
 	var response protocol.StatusResponse
 	if _, err := c.postJSON(ctx, "/api/v1/agent/status", request, c.identity.MachineSecret, &response); err != nil {
@@ -325,6 +357,7 @@ func (c *Client) postJSON(ctx context.Context, path string, request any, bearer 
 
 func (c *Client) Run(ctx context.Context) error {
 	backoff := time.Second
+	failed := false
 	for {
 		err := c.SyncOnce(ctx)
 		if ctx.Err() != nil {
@@ -332,7 +365,14 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 		wait := 30*time.Second + jitter(5*time.Second)
 		if err != nil {
-			log.Printf("控制通道同步失败：%v", err)
+			if !failed {
+				message := err.Error()
+				if len(message) > 256 {
+					message = message[:256]
+				}
+				log.Printf("控制通道同步失败，将退避重试：%s", message)
+			}
+			failed = true
 			wait = backoff + jitter(backoff/2)
 			if backoff < 60*time.Second {
 				backoff *= 2
@@ -341,6 +381,10 @@ func (c *Client) Run(ctx context.Context) error {
 				}
 			}
 		} else {
+			if failed {
+				log.Print("控制通道同步已恢复")
+			}
+			failed = false
 			backoff = time.Second
 		}
 		timer := time.NewTimer(wait)
