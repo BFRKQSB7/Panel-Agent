@@ -21,8 +21,8 @@ type boundaryCounter struct {
 	Downlink int64 `json:"downlink"`
 }
 
-// These are cumulative observations, not billable deltas. The later durable
-// ledger must deduplicate by Core instance and retain explicit observation gaps.
+// These are cumulative observations, not billable deltas. The durable ledger
+// deduplicates by Core instance and preserves explicit observation gaps.
 type coreBoundary struct {
 	Version             int               `json:"version"`
 	Generation          uint64            `json:"core_generation"`
@@ -46,6 +46,9 @@ func (m *CoreManager) captureRecordBoundary(ctx context.Context, record *coreCon
 		return "", nil
 	}
 	if m.state.Boundary != "" {
+		if err := m.consumeBoundaryFile(ctx, m.state.Boundary, false); err != nil {
+			return "", err
+		}
 		return m.state.Boundary, nil
 	}
 	dir := filepath.Join(m.dir, "boundaries")
@@ -53,8 +56,8 @@ func (m *CoreManager) captureRecordBoundary(ctx context.Context, record *coreCon
 	if err != nil {
 		return "", err
 	}
-	// Never discard unconsumed usage mappings to make space. Until D08 consumes
-	// them, refuse a new restart once this bounded queue reaches its ceiling.
+	// Never discard unconsumed mappings to make space. Legacy/development evidence
+	// remains bounded; normal formal observations are consumed by the ledger.
 	count := 0
 	for _, entry := range entries {
 		if validBoundaryName(entry.Name()) {
@@ -73,6 +76,9 @@ func (m *CoreManager) captureRecordBoundary(ctx context.Context, record *coreCon
 	if disappeared {
 		boundary.ObservationGap, boundary.UnobservedTail = "core_disappeared_before_final_sample", true
 	} else {
+		if err := m.proveSampleProcess(record); err != nil {
+			return "", err
+		}
 		probe, cancel := context.WithTimeout(ctx, 4*time.Second)
 		defer cancel()
 		stats, err := xray.DialStats(probe, "127.0.0.1:10085")
@@ -98,6 +104,9 @@ func (m *CoreManager) captureRecordBoundary(ctx context.Context, record *coreCon
 			}
 			boundary.Counters = append(boundary.Counters, counter)
 		}
+		if err := m.proveSampleProcess(record); err != nil {
+			return "", err
+		}
 	}
 	boundary.SampleFinishedAt = time.Now().UTC()
 	id, err := security.NewUUID()
@@ -111,6 +120,9 @@ func (m *CoreManager) captureRecordBoundary(ctx context.Context, record *coreCon
 	next := m.state
 	next.Boundary = name
 	if err := m.save(next); err != nil {
+		return "", err
+	}
+	if err := m.consumeBoundaryFile(ctx, name, false); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -197,5 +209,8 @@ func (m *CoreManager) finishBoundary(name string, stillRunning bool) error {
 	}
 	next := m.state
 	next.Boundary = ""
-	return m.save(next)
+	if err := m.save(next); err != nil {
+		return err
+	}
+	return m.consumeBoundaryFile(context.Background(), name, true)
 }

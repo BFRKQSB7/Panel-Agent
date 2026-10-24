@@ -1,0 +1,22 @@
+=== RUN   TestLostCandidateRetainsIdentityAndExplicitGap
+--- PASS: TestLostCandidateRetainsIdentityAndExplicitGap (0.01s)
+=== RUN   TestRealCoreExpiryWithoutPanelAndRecovery
+--- PASS: TestRealCoreExpiryWithoutPanelAndRecovery (6.11s)
+=== RUN   TestRealCoreExpiryDuringUnreachablePanel
+--- PASS: TestRealCoreExpiryDuringUnreachablePanel (4.82s)
+=== RUN   TestRealCoreDurableLedgerAndLostACK
+    core_ledger_linux_test.go:377: real_requests=6; raw_before_restart={3472 12960}; raw_after_restart={5208 19443}; final_sum={10416 38884}; frozen_segments=3; duplicate_reports=3; closed_through=3; physical_stop_tail=unbounded
+--- PASS: TestRealCoreDurableLedgerAndLostACK (18.91s)
+=== RUN   TestRealCoreApplyAndCrashRecovery
+=== RUN   TestRealCoreApplyAndCrashRecovery/validating
+=== RUN   TestRealCoreApplyAndCrashRecovery/stopping
+=== RUN   TestRealCoreApplyAndCrashRecovery/starting
+=== RUN   TestRealCoreApplyAndCrashRecovery/checking
+--- PASS: TestRealCoreApplyAndCrashRecovery (5.87s)
+    --- PASS: TestRealCoreApplyAndCrashRecovery/validating (0.03s)
+    --- PASS: TestRealCoreApplyAndCrashRecovery/stopping (1.13s)
+    --- PASS: TestRealCoreApplyAndCrashRecovery/starting (1.12s)
+    --- PASS: TestRealCoreApplyAndCrashRecovery/checking (1.21s)
+=== RUN   TestRealCoreFallbackDoesNotUndoRevocation
+--- PASS: TestRealCoreFallbackDoesNotUndoRevocation (4.57s)
+PASS

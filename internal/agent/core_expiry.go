@@ -119,6 +119,13 @@ func (m *CoreManager) recordAtPresent(record *coreConfigRecord) (*coreConfigReco
 	}
 	hash := sha256.Sum256(rendered.Bytes)
 	next := *record
+	if m.state.PermissionDigest != "" {
+		floor, err := m.readDesired(&coreConfigRecord{Digest: m.state.PermissionDigest})
+		if err != nil {
+			return nil, err
+		}
+		next.PeriodPolicies = floor.PeriodPolicies
+	}
 	next.ConfigHash, next.Mappings, next.Listeners = hex.EncodeToString(hash[:]), rendered.Mappings, rendered.Listeners
 	if err := storage.WritePrivateAtomic(m.configPath(&next), rendered.Bytes); err != nil {
 		return nil, err

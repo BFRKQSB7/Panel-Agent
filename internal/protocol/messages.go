@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+
+	"panel-agent.local/panel-agent/internal/period"
 )
 
 const AgentVersion = "0.1.0"
@@ -64,7 +66,9 @@ type ProxyCredential struct {
 }
 
 type DesiredState struct {
-	Nodes []DesiredNode `json:"nodes"`
+	Nodes                   []DesiredNode   `json:"nodes"`
+	PeriodPolicies          []period.Policy `json:"period_policies,omitempty"`
+	TrafficReportingEnabled bool            `json:"traffic_reporting_enabled,omitempty"`
 }
 
 type RegisterRequest struct {

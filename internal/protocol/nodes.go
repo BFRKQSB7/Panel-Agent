@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/idna"
 
+	"panel-agent.local/panel-agent/internal/period"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -53,6 +54,14 @@ func ValidText(text string, maximum int) bool {
 }
 
 func ValidateDesiredState(state DesiredState) error {
+	if len(state.PeriodPolicies) > 4096 {
+		return errors.New("周期策略数量超限")
+	}
+	for i, p := range state.PeriodPolicies {
+		if err := period.CheckPublication(state.PeriodPolicies[:i], p); err != nil {
+			return err
+		}
+	}
 	if state.Nodes == nil {
 		return errors.New("完整快照必须包含 nodes 列表")
 	}

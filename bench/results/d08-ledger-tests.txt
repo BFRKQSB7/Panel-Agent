@@ -1,0 +1,30 @@
+=== RUN   TestAtomicSourceWatermarkGenerationAndDiskFailure
+--- PASS: TestAtomicSourceWatermarkGenerationAndDiskFailure (0.05s)
+=== RUN   TestOfflineBoundariesFrozenBindingAndClockRollback
+--- PASS: TestOfflineBoundariesFrozenBindingAndClockRollback (0.03s)
+=== RUN   TestACKRecoveryPartialFailurePrefixAndNoForgedCleanup
+--- PASS: TestACKRecoveryPartialFailurePrefixAndNoForgedCleanup (0.03s)
+=== RUN   TestLedgerSubprocessCrashDurability
+=== RUN   TestLedgerSubprocessCrashDurability/sample_before
+=== RUN   TestLedgerSubprocessCrashDurability/sample_after
+=== RUN   TestLedgerSubprocessCrashDurability/ack_before
+=== RUN   TestLedgerSubprocessCrashDurability/ack_after
+--- PASS: TestLedgerSubprocessCrashDurability (0.13s)
+    --- PASS: TestLedgerSubprocessCrashDurability/sample_before (0.04s)
+    --- PASS: TestLedgerSubprocessCrashDurability/sample_after (0.03s)
+    --- PASS: TestLedgerSubprocessCrashDurability/ack_before (0.03s)
+    --- PASS: TestLedgerSubprocessCrashDurability/ack_after (0.03s)
+=== RUN   TestLedgerCrashHelper
+    ledger_test.go:316: subprocess only
+--- SKIP: TestLedgerCrashHelper (0.00s)
+=== RUN   TestOfflinePolicyApplicationPreservesOldFinalAndGlobalPeriod
+--- PASS: TestOfflinePolicyApplicationPreservesOldFinalAndGlobalPeriod (0.02s)
+=== RUN   TestTransitAndMissingDatabaseAreNeverAttributedOrRebuilt
+--- PASS: TestTransitAndMissingDatabaseAreNeverAttributedOrRebuilt (0.01s)
+=== RUN   TestRecoveryRequestCannotBeMutatedOrReusedAfterPause
+--- PASS: TestRecoveryRequestCannotBeMutatedOrReusedAfterPause (0.01s)
+=== RUN   TestHistoricalBoundaryReplayKeepsNewerWatermark
+--- PASS: TestHistoricalBoundaryReplayKeepsNewerWatermark (0.02s)
+=== RUN   TestCumulativeACKStaysBelowLocalTotalsAndDoesNotAuthorizeCleanup
+--- PASS: TestCumulativeACKStaysBelowLocalTotalsAndDoesNotAuthorizeCleanup (0.02s)
+PASS

@@ -21,6 +21,7 @@ type coreProcess struct {
 	PID        int    `json:"pid"`
 	StartTicks string `json:"start_ticks"`
 	ConfigPath string `json:"config_path"`
+	BootID     string `json:"boot_id,omitempty"`
 }
 
 func inspectCoreProcess(pid int, binary string) (coreProcess, error) {
@@ -44,7 +45,11 @@ func inspectCoreProcess(pid int, binary string) (coreProcess, error) {
 	if len(args) != 4 || string(args[0]) != binary || string(args[1]) != "run" || string(args[2]) != "-config" {
 		return coreProcess{}, errors.New("process does not match the managed Core")
 	}
-	return coreProcess{PID: pid, StartTicks: fields[19], ConfigPath: string(args[3])}, nil
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil || len(bytes.TrimSpace(boot)) == 0 {
+		return coreProcess{}, errors.New("cannot prove Core boot identity")
+	}
+	return coreProcess{PID: pid, StartTicks: fields[19], ConfigPath: string(args[3]), BootID: strings.TrimSpace(string(boot))}, nil
 }
 
 func findCoreProcesses(binary string, configPaths map[string]bool) ([]coreProcess, error) {

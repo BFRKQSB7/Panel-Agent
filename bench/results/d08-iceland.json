@@ -1,0 +1,19 @@
+{
+  "task": "D08",
+  "host": "iceland-W8eRiY",
+  "passed": true,
+  "checks": {
+    "real_core_fault_suite": "PASS",
+    "ledger_crash_ack_suite": "PASS"
+  },
+  "core_tests_only": true,
+  "resources": {
+    "system_samples": 4210,
+    "system_peak_bytes": 83685376,
+    "check_samples": 0,
+    "check_sampled_hwm_kib": 0,
+    "run_samples": 0,
+    "run_sampled_hwm_kib": 0
+  },
+  "cleanup": "PASS"
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"panel-agent.local/panel-agent/internal/agent"
+	"panel-agent.local/panel-agent/internal/agent/ledger"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -26,7 +28,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control-agent pair | re-pair | sync | run")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger")
 	}
 	switch args[0] {
 	case "pair":
@@ -37,8 +39,19 @@ func run(args []string) error {
 		return runSync(args[1:])
 	case "run":
 		return runAgent(args[1:])
+	case "ledger":
+		flags := flag.NewFlagSet("ledger", flag.ContinueOnError)
+		dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+			return errors.New("用法：control-agent ledger [--data-dir PATH]")
+		}
+		diagnostic, err := ledger.Inspect(context.Background(), *dataDir)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(diagnostic)
 	default:
-		return errors.New("用法：control-agent pair | re-pair | sync | run")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger")
 	}
 }
 

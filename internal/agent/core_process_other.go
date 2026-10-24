@@ -13,6 +13,7 @@ type coreProcess struct {
 	PID        int    `json:"pid"`
 	StartTicks string `json:"start_ticks"`
 	ConfigPath string `json:"config_path"`
+	BootID     string `json:"boot_id,omitempty"`
 }
 
 func inspectCoreProcess(int, string) (coreProcess, error) {

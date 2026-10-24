@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"panel-agent.local/panel-agent/internal/agent/ledger"
 	"panel-agent.local/panel-agent/internal/protocol"
 	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
@@ -35,6 +36,7 @@ type Client struct {
 	syncMu      sync.Mutex
 	processLock *storage.ProcessLock
 	core        *CoreManager
+	ledger      *ledger.Store
 }
 
 type APIError struct {
@@ -83,6 +85,10 @@ func NewClient(store *identityStore, identity Identity, caCertPath string) (*Cli
 }
 
 func (c *Client) Close() {
+	if c.ledger != nil {
+		_ = c.ledger.Close()
+		c.ledger = nil
+	}
 	if transport, ok := c.httpClient.Transport.(*http.Transport); ok {
 		transport.CloseIdleConnections()
 	}
@@ -108,7 +114,11 @@ func (c *Client) EnableCore(ctx context.Context, binaryPath string, developmentL
 	if err != nil {
 		return err
 	}
-	c.core = manager
+	book, err := ledger.Open(c.store.dataDir, c.identity.MachineID)
+	if err != nil {
+		return err
+	}
+	c.core, c.ledger, manager.ledger = manager, book, book
 	if err := manager.Recover(ctx); err != nil {
 		return err
 	}
@@ -225,6 +235,9 @@ func (c *Client) SyncOnce(ctx context.Context) (syncErr error) {
 			return errors.New("Panel returned a stale or malformed desired-state response")
 		}
 		if response.AuthorityChange {
+			if c.ledger != nil {
+				c.ledger.PauseACKs()
+			}
 			if response.AuthorityNonce == "" || !validSecret(response.AuthorityNonce) || response.DesiredState == nil {
 				return errors.New("Panel authority challenge is incomplete")
 			}
@@ -280,7 +293,14 @@ func (c *Client) SyncOnce(ctx context.Context) (syncErr error) {
 			applyErr = c.core.Apply(ctx, c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest, c.identity.DesiredState)
 		}
 		statusErr := c.reportStatus(ctx)
-		return errors.Join(applyErr, statusErr)
+		var trafficErr error
+		if c.core != nil {
+			trafficErr = c.core.Sample(ctx)
+		}
+		if applyErr == nil && statusErr == nil && c.identity.DesiredState.TrafficReportingEnabled {
+			trafficErr = errors.Join(trafficErr, c.syncTraffic(ctx))
+		}
+		return errors.Join(applyErr, statusErr, trafficErr)
 	}
 	return errors.New("Panel authority changed repeatedly during the sync sequence")
 }
@@ -378,6 +398,12 @@ func (c *Client) postJSON(ctx context.Context, path string, request any, bearer 
 }
 
 func (c *Client) Run(ctx context.Context) error {
+	if c.core != nil {
+		measureCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); c.runSampler(measureCtx) }()
+		defer func() { cancel(); <-done }()
+	}
 	backoff := time.Second
 	failed := false
 	for {

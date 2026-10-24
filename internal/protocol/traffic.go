@@ -14,6 +14,34 @@ import (
 const TrafficVersion = 1
 const MaxTrafficBatch = 256
 
+// Recovery always precedes traffic ACK consumption after process start or an
+// authority change. Held ranges describe local final records, not new charges.
+type CloseRange struct {
+	First uint64 `json:"first,string"`
+	Last  uint64 `json:"last,string"`
+}
+type TrafficRecoveryRequest struct {
+	Version        int                     `json:"version"`
+	RequestID      string                  `json:"request_id"`
+	AuthorityEpoch string                  `json:"authority_epoch"`
+	MachineID      string                  `json:"machine_id"`
+	LedgerEpoch    string                  `json:"ledger_epoch"`
+	InstallationID string                  `json:"installation_id,omitempty"`
+	Allocated      uint64                  `json:"allocated_close_seq,string"`
+	Held           []CloseRange            `json:"held_final_ranges"`
+	Receipt        *security.ClosedReceipt `json:"receipt,omitempty"`
+}
+type TrafficRecoveryResponse struct {
+	Version        int                     `json:"version"`
+	RequestID      string                  `json:"request_id"`
+	AuthorityEpoch string                  `json:"authority_epoch"`
+	MachineID      string                  `json:"machine_id"`
+	LedgerEpoch    string                  `json:"ledger_epoch"`
+	InstallationID string                  `json:"installation_id"`
+	Resume         bool                    `json:"resume"`
+	Receipt        *security.ClosedReceipt `json:"receipt,omitempty"`
+}
+
 var ErrTraffic = errors.New("无效或冲突的流量报告")
 
 type SegmentKey struct {
@@ -70,17 +98,30 @@ func (t Totals) Validate() error { _, err := quantity.Add(t.Uplink, t.Downlink);
 // by D08 in the freeze transaction, monotonically per machine x ledger_epoch.
 // Core generations are observation provenance, never part of this identity.
 type TrafficSegment struct {
-	Key       SegmentKey      `json:"key"`
-	Stream    TrafficStream   `json:"stream"`
-	Periods   []period.Period `json:"periods"`
-	Start     time.Time       `json:"start_utc"`
-	Through   time.Time       `json:"through_utc"`
-	Totals    Totals          `json:"totals"`
-	Finalized bool            `json:"finalized"`
-	CloseSeq  uint64          `json:"close_seq,string"`
+	Key         SegmentKey         `json:"key"`
+	Stream      TrafficStream      `json:"stream"`
+	Periods     []period.Period    `json:"periods"`
+	Start       time.Time          `json:"start_utc"`
+	Through     time.Time          `json:"through_utc"`
+	Totals      Totals             `json:"totals"`
+	Finalized   bool               `json:"finalized"`
+	CloseSeq    uint64             `json:"close_seq,string"`
+	Uncertainty *ObservationWindow `json:"uncertainty,omitempty"`
+}
+
+// A conservative envelope of ambiguous observations, not an invented error
+// bound. The true byte distribution inside this interval is unknown.
+type ObservationWindow struct {
+	From      time.Time `json:"from_utc"`
+	To        time.Time `json:"to_utc"`
+	Reason    string    `json:"reason"`
+	Unbounded bool      `json:"no_error_bound"`
 }
 
 func (s TrafficSegment) Validate() error {
+	if u := s.Uncertainty; u != nil && (!period.ValidUTC(u.From) || !period.ValidUTC(u.To) || u.To.Before(u.From) || u.Reason == "") {
+		return ErrTraffic
+	}
 	if s.Key.Validate() != nil || s.Totals.Validate() != nil || !period.ValidUTC(s.Start) || !period.ValidUTC(s.Through) || s.Through.Before(s.Start) || s.Finalized != (s.CloseSeq > 0) || s.CloseSeq > 1<<63-1 {
 		return ErrTraffic
 	}
@@ -132,6 +173,13 @@ func ValidateCumulativeUpdate(previous, next TrafficSegment) error {
 	}
 	if previous.Finalized && (!next.Finalized || next.CloseSeq != previous.CloseSeq || next.Totals != previous.Totals || !next.Through.Equal(previous.Through)) {
 		return ErrTraffic
+	}
+	if previous.Finalized {
+		a, _ := json.Marshal(previous.Uncertainty)
+		b, _ := json.Marshal(next.Uncertainty)
+		if !bytes.Equal(a, b) {
+			return ErrTraffic
+		}
 	}
 	return nil
 }

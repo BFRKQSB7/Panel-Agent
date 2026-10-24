@@ -16,20 +16,24 @@ import (
 	"sync"
 	"time"
 
+	"panel-agent.local/panel-agent/internal/agent/ledger"
 	"panel-agent.local/panel-agent/internal/core/xray"
+	"panel-agent.local/panel-agent/internal/period"
 	"panel-agent.local/panel-agent/internal/protocol"
 	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
 )
 
 type coreConfigRecord struct {
-	AuthorityEpoch string             `json:"authority_epoch"`
-	Revision       uint64             `json:"revision"`
-	Digest         string             `json:"digest"`
-	ConfigHash     string             `json:"config_hash"`
-	Mappings       []xray.StatMapping `json:"mappings"`
-	Listeners      []string           `json:"listeners"`
-	HasSource      bool               `json:"has_source,omitempty"`
+	AuthorityEpoch  string             `json:"authority_epoch"`
+	Revision        uint64             `json:"revision"`
+	Digest          string             `json:"digest"`
+	ConfigHash      string             `json:"config_hash"`
+	Mappings        []xray.StatMapping `json:"mappings"`
+	Listeners       []string           `json:"listeners"`
+	HasSource       bool               `json:"has_source,omitempty"`
+	PeriodPolicies  []period.Policy    `json:"period_policies,omitempty"`
+	PolicyAppliedAt time.Time          `json:"policy_applied_at,omitempty"`
 }
 
 type coreJournal struct {
@@ -66,6 +70,7 @@ type CoreManager struct {
 	binary              string
 	state               coreJournal
 	developmentLoopback bool
+	ledger              *ledger.Store
 }
 
 func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*CoreManager, error) {
@@ -176,6 +181,21 @@ func (m *CoreManager) load() error {
 }
 
 func (m *CoreManager) save(state coreJournal) error {
+	if state.Current != nil {
+		copy := *state.Current
+		if m.state.Current == nil {
+			copy.PolicyAppliedAt = time.Now().UTC()
+		} else {
+			before, _ := json.Marshal(m.state.Current.PeriodPolicies)
+			after, _ := json.Marshal(copy.PeriodPolicies)
+			if !bytes.Equal(before, after) {
+				copy.PolicyAppliedAt = time.Now().UTC()
+			} else if copy.PolicyAppliedAt.IsZero() {
+				copy.PolicyAppliedAt = m.state.Current.PolicyAppliedAt
+			}
+		}
+		state.Current = &copy
+	}
 	contents, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -274,6 +294,11 @@ func (m *CoreManager) start(ctx context.Context, record *coreConfigRecord, phase
 	next := m.state
 	next.Generation++
 	next.InstanceID, next.Process, next.Phase = id, nil, phase
+	if m.ledger != nil {
+		if err := m.ledger.RegisterSource(ctx, id, next.Generation, time.Now().UTC(), true); err != nil {
+			return coreProcess{}, err
+		}
+	}
 	if err := m.save(next); err != nil {
 		return coreProcess{}, err
 	}
@@ -355,6 +380,9 @@ func (m *CoreManager) Recover(ctx context.Context) error {
 }
 
 func (m *CoreManager) recoverLocked(ctx context.Context) error {
+	if err := m.consumeCompletedBoundaries(ctx); err != nil {
+		return err
+	}
 	processes, err := m.ownedProcesses()
 	if err != nil {
 		return err
@@ -392,6 +420,28 @@ func (m *CoreManager) recoverLocked(ctx context.Context) error {
 		return m.prune()
 	}
 	if current != nil && m.health(ctx, *current, m.state.Current, false) == nil {
+		if m.state.Process == nil || *current != *m.state.Process {
+			// Matching config path is not evidence that this is the same process.
+			if m.ledger != nil {
+				if err := m.ledger.RecordGap(ctx, "core_identity_continuity_unproven", time.Now().UTC(), time.Now().UTC()); err != nil {
+					return err
+				}
+			}
+			id, err := security.NewUUID()
+			if err != nil {
+				return err
+			}
+			next := m.state
+			if next.Generation >= 1<<63-1 {
+				return errors.New("Core generation exhausted")
+			}
+			next.Generation++
+			next.InstanceID = id
+			next.Process = current
+			if err = m.save(next); err != nil {
+				return err
+			}
+		}
 		if err := m.finishBoundary(m.state.Boundary, true); err != nil {
 			return err
 		}
@@ -472,7 +522,14 @@ func (m *CoreManager) apply(ctx context.Context, epoch string, revision uint64, 
 	if err := m.persistDesired(digest, desired); err != nil {
 		return m.fail(protocol.ErrorCoreStorageFailed)
 	}
-	candidate := &coreConfigRecord{AuthorityEpoch: epoch, Revision: revision, Digest: digest, ConfigHash: hex.EncodeToString(hash[:]), Mappings: rendered.Mappings, Listeners: rendered.Listeners, HasSource: true}
+	candidate := &coreConfigRecord{AuthorityEpoch: epoch, Revision: revision, Digest: digest, ConfigHash: hex.EncodeToString(hash[:]), Mappings: rendered.Mappings, Listeners: rendered.Listeners, HasSource: true, PeriodPolicies: desired.PeriodPolicies}
+	if !confirmedPolicy && m.state.PermissionDigest != "" {
+		floor, err := m.readDesired(&coreConfigRecord{Digest: m.state.PermissionDigest})
+		if err != nil {
+			return err
+		}
+		candidate.PeriodPolicies = floor.PeriodPolicies
+	}
 	if current := m.state.Current; current != nil && current.AuthorityEpoch == epoch && current.Revision == revision && current.Digest == digest && current.ConfigHash == candidate.ConfigHash {
 		if !current.HasSource || confirmedPolicy && m.state.PermissionDigest != digest {
 			next := m.state
@@ -509,6 +566,18 @@ func (m *CoreManager) apply(ctx context.Context, epoch string, revision uint64, 
 	}
 	previous := m.state.Current
 	if previous != nil && previous.ConfigHash == candidate.ConfigHash {
+		before, _ := json.Marshal(previous.PeriodPolicies)
+		after, _ := json.Marshal(candidate.PeriodPolicies)
+		if !bytes.Equal(before, after) {
+			boundary, err := m.captureBoundary(ctx, false)
+			if err != nil {
+				return err
+			}
+			if err = m.finishBoundary(boundary, true); err != nil {
+				return err
+			}
+			next = m.state
+		}
 		next.Current, next.Candidate, next.Phase, next.LastError = candidate, nil, "stable", ""
 		if confirmedPolicy {
 			next.PermissionDigest = digest

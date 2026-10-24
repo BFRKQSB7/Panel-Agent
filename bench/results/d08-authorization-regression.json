@@ -1,0 +1,28 @@
+{
+  "task": "D05",
+  "host": "iceland-W8eRiY",
+  "passed": true,
+  "checks": {
+    "real_core_fault_suite": "PASS",
+    "three_nodes_one_core": "PASS",
+    "unchanged_snapshot": "PASS",
+    "metadata_without_restart": "PASS",
+    "panel_offline_service": "PASS",
+    "agent_killed_before_health_offline_rollback": "PASS",
+    "formal_group_isolation": "PASS",
+    "new_node_group_membership": "PASS",
+    "group_change_and_rotation": "PASS",
+    "partial_batch_visible": "PASS",
+    "offline_expiry_and_restart": "PASS",
+    "master_key_missing_fail_closed": "PASS"
+  },
+  "resources": {
+    "system_samples": 23531,
+    "system_peak_bytes": 105734144,
+    "check_samples": 10,
+    "check_sampled_hwm_kib": 17360,
+    "run_samples": 17533,
+    "run_sampled_hwm_kib": 23760
+  },
+  "cleanup": "PASS"
+}

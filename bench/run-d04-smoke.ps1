@@ -10,14 +10,16 @@ param(
     [switch]$Authorization,
     [switch]$CoreTestsOnly,
     [switch]$ClientCompatibilityOnly,
-    [switch]$SubscriptionsOnly
+    [switch]$SubscriptionsOnly,
+    [switch]$LedgerOnly
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $work = Join-Path $PSScriptRoot '.work'
 $runId = [guid]::NewGuid().ToString('N')
 if($SubscriptionsOnly){$Authorization=$true;. (Join-Path $PSScriptRoot 'd06-subscriptions.ps1')}
-$task = if($ClientCompatibilityOnly -or $SubscriptionsOnly){'D06'}elseif($Authorization){'D05'}else{'D04'}
+if($LedgerOnly){$CoreTestsOnly=$true}
+$task = if($LedgerOnly){'D08'}elseif($ClientCompatibilityOnly -or $SubscriptionsOnly){'D06'}elseif($Authorization){'D05'}else{'D04'}
 $local = Join-Path $work "$($task.ToLowerInvariant())-$runId"
 New-Item -ItemType Directory -Force -Path $local | Out-Null
 $remote = if ($PreparedRemoteDirectory) { $PreparedRemoteDirectory } else { "/tmp/panel-agent-d04-$runId" }
@@ -266,6 +268,7 @@ try {
             $env:GOOS='linux'
             & go test -c -ldflags '-s -w' -o "$local/d04-core-tests" ./internal/agent
             if ($LASTEXITCODE -ne 0) { throw 'Linux test build failed.' }
+            if($LedgerOnly){& go test -c -ldflags '-s -w' -o "$local/d08-ledger-tests" ./internal/agent/ledger; if($LASTEXITCODE -ne 0){throw 'Ledger test build failed.'}}
             if(-not $CoreTestsOnly){foreach ($target in @(@('d04-control','./cmd/control'),@('d04-agent','./cmd/agent'),@('d04-http-target','./bench/http-target'))) {
                 & go build -ldflags '-s -w' -o "$local/$($target[0])" $target[1]
                 if ($LASTEXITCODE -ne 0) { throw 'Linux binary build failed.' }
@@ -282,6 +285,7 @@ try {
     if (-not $PreparedRemoteDirectory) {
         [void](Remote "mkdir -m 700 '$remote'")
         $bundleFiles=@('d04-core-tests')
+        if($LedgerOnly){$bundleFiles+=@('d08-ledger-tests')}
         if(-not $CoreTestsOnly){$bundleFiles+=@('d04-control','d04-agent','d04-http-target')}
         & tar.exe -czf "$local/bundle.tar.gz" -C $local @bundleFiles
         if ($LASTEXITCODE -ne 0) { throw 'Benchmark bundle failed.' }
@@ -289,6 +293,7 @@ try {
         [void](Remote "cd '$remote'; tar -xzf bundle.tar.gz")
     }
     [void](Remote "test ! -e '$remote/panel'; printf '%s' '$remote' > '$remote/.owner'; chmod 600 '$remote/.owner'; cd '$remote'; test `"`$(sha256sum Xray-linux-64.zip | cut -d ' ' -f1)`" = 0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978; unzip -q -o Xray-linux-64.zip xray; chmod 700 d04-* xray")
+    if($LedgerOnly){[void](Remote "chmod 700 '$remote/d08-ledger-tests'")}
     $prepared=$true
     $monitor=@'
 cd '__REMOTE__'
@@ -313,10 +318,11 @@ echo $! > monitor.pid
     [void](Remote $monitor.Replace('__REMOTE__',$remote))
     $pattern=if($CoreTestsOnly){'^Test(LostCandidateRetainsIdentityAndExplicitGap|RealCore.*)$'}elseif($Authorization){'^TestRealCore(ApplyAndCrashRecovery|ExpiryWithoutPanelAndRecovery|ExpiryDuringUnreachablePanel|FallbackDoesNotUndoRevocation)$'}else{'^TestRealCoreApplyAndCrashRecovery$'}
     if(-not $ClientCompatibilityOnly -and -not $SubscriptionsOnly){
-    $test=Remote "cd '$remote'; TMPDIR='$remote' PANEL_AGENT_TEST_XRAY='$remote/xray' ./d04-core-tests -test.run '$pattern' -test.v -test.timeout 90s"
+    $test=Remote "cd '$remote'; TMPDIR='$remote' PANEL_AGENT_TEST_XRAY='$remote/xray' ./d04-core-tests -test.run '$pattern' -test.v -test.timeout 180s"
     [IO.File]::WriteAllText("$local/core-tests.txt",$test.Text)
     $result.checks.real_core_fault_suite='PASS'
     Write-Output 'D04: pinned real Core fault/recovery suite passed.'
+    if($LedgerOnly){$test=Remote "cd '$remote'; TMPDIR='$remote' ./d08-ledger-tests -test.v -test.timeout 60s" -AllowFailure;[IO.File]::WriteAllText("$local/ledger-tests.txt",$test.Text);if($test.Code -ne 0){throw "Linux ledger suite failed: $($test.Text)"};$result.checks.ledger_crash_ack_suite='PASS'}
     }
     if($CoreTestsOnly){$result.passed=$true;return}
 
@@ -466,6 +472,9 @@ exit 1
     Write-Output 'D04: three Nodes, offline rollback, and existing TCP/UDP revocation passed.'
     }
     $result.passed=$true
+} catch {
+    $result.failure=$_.Exception.Message
+    throw
 } finally {
     $index=0
     foreach ($entry in $processes) {

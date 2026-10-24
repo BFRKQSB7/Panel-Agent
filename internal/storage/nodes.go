@@ -305,6 +305,10 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 		}
 		state.Nodes = append(state.Nodes, desired)
 	}
+	state.PeriodPolicies, err = machinePoliciesTx(ctx, tx, machineID, state)
+	if err != nil {
+		return err
+	}
 	if err := protocol.ValidateDesiredState(state); err != nil {
 		return fmt.Errorf("validate machine snapshot: %w", err)
 	}
