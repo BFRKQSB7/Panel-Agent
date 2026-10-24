@@ -101,6 +101,29 @@ func TestUserGroupAdminFormsPartialBatchAndAPIScope(t *testing.T) {
 		return response.StatusCode
 	}
 	input, _ := json.Marshal(storage.UserInput{Name: "Injected", UserGroupID: groups[0].GroupID, Enabled: true})
+	for _, amount := range []string{`"9007199254740993"`, `"9223372036854775807"`, `"0"`, `null`} {
+		payload := `{"name":"Alice","user_group_id":"` + groups[0].GroupID + `","enabled":true,"expires_at":"","quota_bytes":` + amount + `}`
+		if status := api(admin, "PUT", "/api/admin/users/"+user.UserID, csrf, "", payload); status != 200 {
+			t.Fatalf("exact quota %s status=%d", amount, status)
+		}
+		stored, err := s.store.GetUser(context.Background(), user.UserID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(stored)
+		if err != nil || !bytes.Contains(encoded, []byte(`"quota_bytes":`+amount)) {
+			t.Fatal("quota changed across API/SQLite", string(encoded), err)
+		}
+		if stored.CredentialUUID != user.CredentialUUID {
+			t.Fatal("quota edit rotated credential")
+		}
+	}
+	for _, amount := range []string{`0`, `"-1"`, `"1e3"`, `"1.5"`, `"01"`, `"9223372036854775808"`} {
+		payload := `{"name":"Alice","user_group_id":"` + groups[0].GroupID + `","enabled":true,"expires_at":"","quota_bytes":` + amount + `}`
+		if status := api(admin, "PUT", "/api/admin/users/"+user.UserID, csrf, "", payload); status != 400 {
+			t.Fatalf("invalid quota %s accepted=%d", amount, status)
+		}
+	}
 	if status := api(admin, "POST", "/api/admin/users", "", "", string(input)); status != http.StatusForbidden {
 		t.Fatalf("missing CSRF=%d", status)
 	}

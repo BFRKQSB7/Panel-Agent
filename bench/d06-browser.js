@@ -18,7 +18,7 @@ async (providedPage) => {
     const groupResponse = await page.request.post(base+"/api/admin/groups/user",{headers,data:{name:"browser-"+Date.now(),node_group_ids:[]}});
     assert(groupResponse.status()===201,"group setup failed");
     const group = await groupResponse.json();
-    const userResponse = await page.request.post(base+"/api/admin/users",{headers,data:{name:"browser-"+Date.now(),user_group_id:group.group_id,enabled:true,expires_at:"",quota_bytes:0}});
+    const userResponse = await page.request.post(base+"/api/admin/users",{headers,data:{name:"browser-"+Date.now(),user_group_id:group.group_id,enabled:true,expires_at:"",quota_bytes:"0"}});
     assert(userResponse.status()===201,"user setup failed");
     const user = await userResponse.json();
     await page.goto(base+"/admin/users");

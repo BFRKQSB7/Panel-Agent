@@ -3,7 +3,7 @@ package control
 import (
 	"net/http"
 	"net/url"
-	"strconv"
+	"panel-agent.local/panel-agent/internal/quantity"
 	"strings"
 	"time"
 
@@ -28,7 +28,7 @@ func userInputForm(form url.Values) (storage.UserInput, error) {
 		}
 	}
 	if value := strings.TrimSpace(form.Get("quota_bytes")); value != "" {
-		quota, err := strconv.ParseInt(value, 10, 64)
+		quota, err := quantity.Parse(value)
 		if err != nil || quota < 0 {
 			return input, storage.ErrInvalidUser
 		}
@@ -65,7 +65,7 @@ func (s *Server) renderUsersPage(w http.ResponseWriter, r *http.Request, results
 			editor.GroupChoices = append(editor.GroupChoices, groupChoice{ID: group.GroupID, Name: group.Name, Selected: group.GroupID == user.UserGroupID})
 		}
 		if user.QuotaBytes != nil {
-			editor.QuotaValue = strconv.FormatInt(*user.QuotaBytes, 10)
+			editor.QuotaValue = user.QuotaBytes.String()
 		}
 		if expiry, err := time.Parse(time.RFC3339, user.ExpiresAt); err == nil {
 			editor.ExpiryValue = expiry.UTC().Format("2006-01-02T15:04:05")

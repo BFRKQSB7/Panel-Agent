@@ -1,0 +1,15 @@
+{
+  "task": "D07",
+  "passed": true,
+  "host": "iceland-W8eRiY",
+  "checked_at": "2026-10-24T11:17:48.1285364Z",
+  "checks": {
+    "identity": "3.23.4\n7.0.0-34-generic",
+    "identical_windows_linux": true,
+    "fixture_sha256": "a7c3dd6a76392566947d5eaac722f51ac4ba0b6e1b995827395245ebaea39736",
+    "linux_binary_sha256": "1f3fb4d8208a36d971839dccbba05becce2ba4a587c16afb476cc3fd1c8f98fb",
+    "tzdata": "sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779",
+    "original_listeners_and_services": true,
+    "cleanup": "PASS"
+  }
+}

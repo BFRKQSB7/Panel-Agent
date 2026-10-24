@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
+	"panel-agent.local/panel-agent/internal/quantity"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -50,7 +51,7 @@ func TestGroupAuthorizationCredentialsAndTombstones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	zero := int64(0)
+	zero := quantity.Bytes(0)
 	alice, err := s.SaveUser(ctx, "", UserInput{Name: "Alice", UserGroupID: ordinary.GroupID, Enabled: true, QuotaBytes: &zero}, now)
 	if err != nil {
 		t.Fatal(err)

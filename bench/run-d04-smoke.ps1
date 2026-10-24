@@ -360,7 +360,7 @@ echo $! > monitor.pid
         $overlapNodeGroup=Domain-API POST '/api/admin/groups/node' @{name='重复授权路径';node_ids=@($nodes[1].node_id)}
         $normalUserGroup=Domain-API POST '/api/admin/groups/user' @{name='普通用户组';node_group_ids=@($normalNodeGroup.group_id,$overlapNodeGroup.group_id)}
         $testUserGroup=Domain-API POST '/api/admin/groups/user' @{name='测试用户组';node_group_ids=@($testNodeGroup.group_id)}
-        $normalUser=Domain-API POST '/api/admin/users' @{name='普通正式用户';user_group_id=$normalUserGroup.group_id;enabled=$true;expires_at='';quota_bytes=0}
+        $normalUser=Domain-API POST '/api/admin/users' @{name='普通正式用户';user_group_id=$normalUserGroup.group_id;enabled=$true;expires_at='';quota_bytes='0'}
         $testUser=Domain-API POST '/api/admin/users' @{name='测试正式用户';user_group_id=$testUserGroup.group_id;enabled=$true;expires_at='';quota_bytes=$null}
     }
     [void](Sync-Agent)

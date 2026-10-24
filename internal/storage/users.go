@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
+	"panel-agent.local/panel-agent/internal/quantity"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -17,11 +18,11 @@ var (
 )
 
 type UserInput struct {
-	Name        string `json:"name"`
-	UserGroupID string `json:"user_group_id"`
-	Enabled     bool   `json:"enabled"`
-	ExpiresAt   string `json:"expires_at"`
-	QuotaBytes  *int64 `json:"quota_bytes"`
+	Name        string          `json:"name"`
+	UserGroupID string          `json:"user_group_id"`
+	Enabled     bool            `json:"enabled"`
+	ExpiresAt   string          `json:"expires_at"`
+	QuotaBytes  *quantity.Bytes `json:"quota_bytes"`
 }
 
 type UserRecord struct {
@@ -160,7 +161,8 @@ func (s *Store) scanUser(row rowScanner) (UserRecord, error) {
 	}
 	user.ExpiresAt, user.GroupDeleted, user.CredentialGeneration, user.CredentialUUID = expiry.String, groupDeleted.Valid, uint64(generation), string(secret)
 	if quota.Valid {
-		user.QuotaBytes = &quota.Int64
+		value := quantity.Bytes(quota.Int64)
+		user.QuotaBytes = &value
 	}
 	return user, nil
 }
@@ -303,11 +305,11 @@ func (s *Store) GetUserAccess(ctx context.Context, id string, now time.Time) (Us
 }
 
 type UserBatchInput struct {
-	Operation   string   `json:"operation"`
-	UserIDs     []string `json:"user_ids"`
-	UserGroupID string   `json:"user_group_id,omitempty"`
-	ExpiresAt   string   `json:"expires_at,omitempty"`
-	QuotaBytes  *int64   `json:"quota_bytes"`
+	Operation   string          `json:"operation"`
+	UserIDs     []string        `json:"user_ids"`
+	UserGroupID string          `json:"user_group_id,omitempty"`
+	ExpiresAt   string          `json:"expires_at,omitempty"`
+	QuotaBytes  *quantity.Bytes `json:"quota_bytes"`
 }
 
 func (s *Store) ChangeUsers(ctx context.Context, input UserBatchInput, now time.Time) ([]BatchUserResult, error) {

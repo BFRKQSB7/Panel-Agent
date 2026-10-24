@@ -1,0 +1,26 @@
+{
+  "task": "D07",
+  "passed": true,
+  "browser": "Chromium",
+  "checks": {
+    "exact_form_api_sqlite": [
+      {
+        "form": "9007199254740993",
+        "json": "9007199254740993"
+      },
+      {
+        "form": "9223372036854775807",
+        "json": "9223372036854775807"
+      },
+      {
+        "form": "0",
+        "json": "0"
+      },
+      {
+        "form": "",
+        "json": null
+      }
+    ],
+    "credential_unchanged": true
+  }
+}
