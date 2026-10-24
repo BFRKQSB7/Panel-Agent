@@ -31,9 +31,14 @@ func (s *Server) handleNodesPage(w http.ResponseWriter, r *http.Request) {
 		writeNodeError(w, err)
 		return
 	}
+	guides := make(map[string]nodeGuide, len(nodes))
+	machineView := storage.MachineViewFromRecord(machine)
+	for _, node := range nodes {
+		guides[node.NodeID] = makeNodeGuide(machine.MachineID, node, machineView)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = s.templates.ExecuteTemplate(w, "nodes.html", map[string]any{
-		"CSRF": session.csrf, "Machine": storage.MachineViewFromRecord(machine), "Nodes": nodes, "Exits": exits,
+		"CSRF": session.csrf, "Machine": machineView, "Nodes": nodes, "Exits": exits, "Guides": guides,
 		"NewNode": storage.NodeInput{Enabled: true, ListenHost: "0.0.0.0", ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443"},
 	})
 }

@@ -16,6 +16,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Reality 节点</title>
+  <script src="/assets/connectivity.js" defer></script>
   <style>
     body{font:16px system-ui,sans-serif;max-width:64rem;margin:3rem auto;padding:0 1rem;color:#17202a}
     article,section{border:1px solid #9aa4ad;border-radius:.5rem;padding:1rem;margin:1rem 0}
@@ -23,6 +24,7 @@
     label{display:flex;flex-direction:column;gap:.4rem}input,button{font:inherit;padding:.55rem;border:1px solid #9aa4ad;border-radius:.3rem;min-width:0}
     label:has([type=checkbox]){display:block}button{background:#17202a;color:white;cursor:pointer}.danger{background:#8f2424}
     code{overflow-wrap:anywhere}.muted{color:#58636d}.development{color:#8f2424}
+    .guide{background:#f5f7f9}.guide-item{display:grid;grid-template-columns:minmax(7rem,auto) minmax(0,1fr) auto;gap:.5rem;align-items:start;margin:.6rem 0}.guide-item textarea{font:inherit;min-height:3rem;width:100%;box-sizing:border-box}.guide-item button{white-space:nowrap}.status{white-space:pre-wrap}.status button{margin:.25rem .4rem .25rem 0}
   </style>
 </head>
 <body>
@@ -58,6 +60,22 @@
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <p><button class="danger" type="submit">删除节点</button></p>
       </form>
+      {{with index $.Guides $node.NodeID}}
+      <section class="guide">
+        <h3>公网接入引导与有限检查</h3>
+        <p class="muted">当前值来自此 Node；改动公网主机或端口后刷新本页再复制。公网探测由 Panel 发起，只能证明选定位置的 DNS/TCP 路径，不能证明 Agent、Reality 握手、UDP、用户订阅或最终代理出口。</p>
+        <h4>NAT / 防火墙</h4>
+        {{range $i, $step := .NAT}}<div class="guide-item"><strong>{{$step.Label}}</strong><textarea id="guide-{{$node.NodeID}}-nat-{{$i}}" readonly>{{$step.Text}}</textarea><span><button type="button" data-copy-target="guide-{{$node.NodeID}}-nat-{{$i}}">复制</button><small data-copy-status></small></span></div>{{end}}
+        <h4>DNS</h4>
+        {{range $i, $step := .DNS}}<div class="guide-item"><strong>{{$step.Label}}</strong><textarea id="guide-{{$node.NodeID}}-dns-{{$i}}" readonly>{{$step.Text}}</textarea><span><button type="button" data-copy-target="guide-{{$node.NodeID}}-dns-{{$i}}">复制</button><small data-copy-status></small></span></div>{{end}}
+        <h4>协议 / 证书</h4>
+        {{range $i, $step := .Protocol}}<div class="guide-item"><strong>{{$step.Label}}</strong><textarea id="guide-{{$node.NodeID}}-protocol-{{$i}}" readonly>{{$step.Text}}</textarea><span><button type="button" data-copy-target="guide-{{$node.NodeID}}-protocol-{{$i}}">复制</button><small data-copy-status></small></span></div>{{end}}
+        <p class="status">Agent：{{.AgentStatus}}
+Core：{{.CoreStatus}}
+探测：{{.ProbeStatus}}</p>
+        <p><button type="button" data-check-path="{{.ProbePath}}" data-check-mode="public">检查 Panel → 公网 TCP</button>{{if .LocalProbe}}<button type="button" data-check-path="{{.ProbePath}}" data-check-mode="local">检查本机 loopback TCP</button>{{end}} <span data-check-status role="status"></span></p>
+      </section>
+      {{end}}
     </article>
     {{end}}
   </main>

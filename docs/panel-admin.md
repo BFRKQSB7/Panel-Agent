@@ -60,6 +60,10 @@ $joinToken | .\control-agent.exe pair --panel-url $panelUrl --data-dir C:\panel-
 
 节点编辑页的“出口”选择只能指向另一台机器的 Exit。Exit 快照先应用并报告成功后，入口 Node 才会启用一跳路由；Exit 未应用、被吊销、应用失败、轮换中或机器硬停时，入口保持禁用，不回退到本机 Direct。Exit 删除在仍有 Node 引用时拒绝；保存配置或轮换 Transit 后，两端重新应用完成前同样保持 Fail Closed。入口用户流量只生成 `user_entry` 账本流，Transit 入站只生成 `machine_only_transit` 账本流，后者只归属 Exit 机器，不重复计入用户或出口 Node。
 
+节点详情页会根据当前机器心跳、Core 应用版本和 Node 的公网/监听字段生成 NAT、DNS、Agent/Core 和 VLESS Reality 引导。复制按钮只复制页面已有的只读值；页面不会自动修改 DNS、云防火墙、证书、CDN 或 NAT。公网检查只面向当前 Node 的公网主机和端口，先做一次 DNS 解析，再把 TCP 拨号绑定到选中的地址；解析结果包含私网、回环、链路本地、共享地址或 IPv4-mapped IPv6 时直接拒绝，避免 DNS 重绑定后继续拨号。
+
+页面上的“检查公网 TCP”使用 `public` 模式，适用于公网域名或公网字面 IP；“检查本机回环”仅接受字面回环地址，不解析域名。检查有固定的 DNS、拨号超时和并发上限，不接受任意 URL、重定向或元数据目标；成功只表示所选地址的 TCP 监听可达，不能证明 Agent 在线、Core 已应用、Reality 握手、UDP、订阅内容或最终出站链路已经验收。自动化管理员可调用 `POST /api/admin/machines/{machineID}/nodes/{nodeID}/connectivity-check`，提交 `{"mode":"public"}` 或 `{"mode":"local"}`，响应分别给出 `dns`、`tcp`、`resolved_ip`、`target` 和 `ok`；DNS 目标被拒绝时返回 422，其他检查结果返回 200。
+
 Linux Agent 使用已验证的 Xray **26.10.21** 可执行文件。以下命令中的路径由管理员提供；此阶段不会下载或安装 Core：
 
 ```sh

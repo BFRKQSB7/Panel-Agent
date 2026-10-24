@@ -19,14 +19,15 @@ import (
 var ErrNotInitialized = errors.New("管理员尚未初始化，请先运行本机 admin init 命令")
 
 type Server struct {
-	config      Config
-	tlsConfig   *tls.Config
-	store       *storage.Store
-	processLock *storage.ProcessLock
-	sessions    *sessionManager
-	limiter     *loginLimiter
-	templates   *template.Template
-	actions     *security.ActionSigner
+	config       Config
+	tlsConfig    *tls.Config
+	store        *storage.Store
+	processLock  *storage.ProcessLock
+	sessions     *sessionManager
+	limiter      *loginLimiter
+	probeLimiter chan struct{}
+	templates    *template.Template
+	actions      *security.ActionSigner
 }
 
 func NewServer(config Config) (*Server, error) {
@@ -77,14 +78,15 @@ func NewServer(config Config) (*Server, error) {
 		return nil, err
 	}
 	return &Server{
-		config:      config,
-		tlsConfig:   tlsConfig,
-		store:       store,
-		processLock: processLock,
-		sessions:    newSessionManager(),
-		limiter:     newLoginLimiter(),
-		templates:   templates,
-		actions:     actions,
+		config:       config,
+		tlsConfig:    tlsConfig,
+		store:        store,
+		processLock:  processLock,
+		sessions:     newSessionManager(),
+		limiter:      newLoginLimiter(),
+		probeLimiter: make(chan struct{}, 2),
+		templates:    templates,
+		actions:      actions,
 	}, nil
 }
 
@@ -167,6 +169,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/admin/machines/{machineID}/exit", s.handleExitAPI)
 	mux.HandleFunc("DELETE /api/admin/machines/{machineID}/exit", s.handleExitAPI)
 	mux.HandleFunc("POST /api/admin/machines/{machineID}/exit/rotate", s.handleExitRotateAPI)
+	mux.HandleFunc("POST /api/admin/machines/{machineID}/nodes/{nodeID}/connectivity-check", s.handleNodeConnectivityCheck)
+	mux.HandleFunc("GET /assets/connectivity.js", s.handleConnectivityScript)
 	mux.HandleFunc("GET /admin/groups", s.handleGroupsPage)
 	mux.HandleFunc("POST /admin/groups/{kind}", s.handleGroupForm)
 	mux.HandleFunc("POST /admin/groups/{kind}/{groupID}", s.handleGroupForm)

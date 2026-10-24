@@ -92,6 +92,15 @@ func TestNodeAdminFormsMachineScopeAndRepair(t *testing.T) {
 	if response.StatusCode != http.StatusSeeOther {
 		t.Fatalf("Node form returned %d", response.StatusCode)
 	}
+	guidePage, err := admin.Get(pageURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guideHTML, _ := io.ReadAll(guidePage.Body)
+	guidePage.Body.Close()
+	if guidePage.StatusCode != http.StatusOK || !strings.Contains(guidePage.Header.Get("Content-Security-Policy"), "connect-src 'self'") || !bytes.Contains(guideHTML, []byte("/assets/connectivity.js")) || !bytes.Contains(guideHTML, []byte("公网接入引导与有限检查")) || !bytes.Contains(guideHTML, []byte("data-copy-target")) {
+		t.Fatal("Node page did not render the contextual copy/check guide")
+	}
 	apiURL := httpServer.URL + "/api/admin/machines/" + a + "/nodes"
 	response, err = admin.Get(apiURL)
 	if err != nil {

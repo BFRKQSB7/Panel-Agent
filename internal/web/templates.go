@@ -5,7 +5,7 @@ import (
 	"html/template"
 )
 
-//go:embed templates/*.html static/tokens.js
+//go:embed templates/*.html static/*.js
 var templateFiles embed.FS
 
 func ParseTemplates() (*template.Template, error) {
@@ -14,5 +14,10 @@ func ParseTemplates() (*template.Template, error) {
 
 func TokenScript() []byte {
 	content, _ := templateFiles.ReadFile("static/tokens.js")
+	return content
+}
+
+func ConnectivityScript() []byte {
+	content, _ := templateFiles.ReadFile("static/connectivity.js")
 	return content
 }
