@@ -49,6 +49,11 @@ func TestStageSwapCommitRestoresStateAndRequiresNewAuthority(t *testing.T) {
 		store.Close()
 		t.Fatal(err)
 	}
+	upgradeIntent, err := store.CreateUpgradeIntent(ctx, storage.UpgradeIntentInput{MachineID: machine.MachineID, TargetVersion: "26.10.22", Source: protocol.UpgradeSourceOfficialXray, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", PackageSize: 1024}, now)
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
 	snapshot, err := store.Snapshot(ctx)
 	if err != nil {
 		store.Close()
@@ -101,6 +106,10 @@ func TestStageSwapCommitRestoresStateAndRequiresNewAuthority(t *testing.T) {
 		Hostname: "should-not-register", OS: "linux", Architecture: "amd64", AgentVersion: protocol.AgentVersion,
 	}, now); !errors.Is(err, storage.ErrInvalidJoinToken) {
 		t.Fatalf("restore retained an unconsumed Join Token: %v", err)
+	}
+	restoredUpgrade, err := restored.GetUpgradeIntent(ctx, upgradeIntent.ID)
+	if err != nil || restoredUpgrade.State != protocol.UpgradeStateCanceled {
+		t.Fatalf("restore retained a pending upgrade intent: (%+v, %v)", restoredUpgrade, err)
 	}
 	challenge, err := restored.DesiredStateExchange(ctx, machine.MachineID, protocol.DesiredStateRequest{
 		RequestID: "11111111-1111-4111-8111-111111111111", AuthorityEpoch: oldAuthority.Epoch, Revision: oldAuthority.Revision, Digest: oldAuthority.Digest,

@@ -6,6 +6,8 @@ Panel 使用 Go 单体、SQLite 和内嵌页面。默认数据目录为 `./data`
 
 一致性备份、加密包、暂存恢复、authority 重连和恢复后流量缺口对账见 [Panel 一致性备份与恢复](panel-backup.md)。
 
+Xray/Panel 手动更新、受控 Upgrade Intent、失败回滚和低盘边界见 [手动更新与回滚](panel-upgrades.md)。
+
 ## 本机开发
 
 在仓库根目录先运行初始化命令。终端会隐藏输入并要求确认管理员口令，口令至少 12 字节、最多 72 字节；口令不会放进命令参数或环境变量。

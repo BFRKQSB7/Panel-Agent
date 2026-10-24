@@ -204,6 +204,9 @@ func (s *Store) FinalizeRestore(ctx context.Context, now time.Time) (PanelAuthor
 	if _, err := tx.ExecContext(ctx, "DELETE FROM token_operations"); err != nil {
 		return PanelAuthority{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE upgrade_intents SET state='canceled',result_code='panel_restore',result_detail='备份恢复后需重新发起升级',updated_at=?,completed_at=? WHERE state IN ('pending','running')`, now.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano)); err != nil {
+		return PanelAuthority{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE machines SET pending_authority_epoch=NULL,pending_authority_nonce=NULL,last_authority_nonce=NULL,
 		received_revision=0,received_digest='',applied_authority_epoch='',applied_revision=0,applied_digest='',
 		apply_error=?,core_generation=0,core_instance_id='',applied_restriction_digest='',restriction_applied_at=NULL,updated_at=?`, protocol.ErrorCorePending, now.UTC().Format(time.RFC3339Nano)); err != nil {

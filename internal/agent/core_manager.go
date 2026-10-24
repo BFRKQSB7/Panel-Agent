@@ -52,6 +52,7 @@ type coreJournal struct {
 	Boundary            string            `json:"pending_boundary,omitempty"`
 	DevelopmentLoopback bool              `json:"development_loopback_test"`
 	PermissionDigest    string            `json:"permission_digest,omitempty"`
+	BinaryVersion       string            `json:"binary_version,omitempty"`
 }
 
 type CoreApplyStatus struct {
@@ -73,6 +74,8 @@ type CoreManager struct {
 	dir                 string
 	binary              string
 	logPath             string
+	binaryVersion       string
+	coreOwned           bool
 	state               coreJournal
 	developmentLoopback bool
 	ledger              *ledger.Store
@@ -94,6 +97,10 @@ func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*Core
 	if err != nil {
 		return nil, err
 	}
+	coreOwned, err := readCoreOwnership(absolute, binary)
+	if err != nil {
+		return nil, err
+	}
 	dir := filepath.Join(absolute, "core")
 	for _, path := range []string{dir, filepath.Join(dir, "boundaries")} {
 		if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
@@ -104,17 +111,25 @@ func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*Core
 			return nil, errors.New("Core 数据目录必须为权限 0700 的真实目录")
 		}
 	}
+	if err := recoverPersistedUpgrade(dir, binary); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	version := &limitedCoreOutput{limit: 4096}
-	command := exec.CommandContext(ctx, binary, "version")
-	command.Stdout, command.Stderr = version, version
-	if err := command.Run(); err != nil || !strings.HasPrefix(version.String(), "Xray 26.10.21 ") {
-		return nil, errors.New("Core 适配器仅接受已验证的 Xray 26.10.21")
+	version, err := readCoreVersion(ctx, binary)
+	if err != nil {
+		return nil, errors.New("Core 适配器不接受该 Xray 版本")
 	}
-	m := &CoreManager{dir: dir, binary: binary, logPath: filepath.Join(dir, "core.log"), developmentLoopback: developmentLoopback}
+	m := &CoreManager{dir: dir, binary: binary, binaryVersion: version, coreOwned: coreOwned, logPath: filepath.Join(dir, "core.log"), developmentLoopback: developmentLoopback}
 	if err := m.load(); err != nil {
 		return nil, err
+	}
+	if m.state.BinaryVersion != version {
+		next := m.state
+		next.BinaryVersion = version
+		if err := m.save(next); err != nil {
+			return nil, err
+		}
 	}
 	return m, nil
 }
@@ -161,6 +176,9 @@ func (m *CoreManager) load() error {
 	}
 	if state.Version != 1 || state.Binary != m.binary || state.Generation > 1<<63-1 || state.DevelopmentLoopback != m.developmentLoopback {
 		return errors.New("Core journal identity or binary does not match")
+	}
+	if state.BinaryVersion != "" && !coreVersionSupported(state.BinaryVersion) {
+		return errors.New("Core journal version is not supported")
 	}
 	if state.Generation > 0 && !security.IsUUIDv4(state.InstanceID) {
 		return errors.New("Core journal has no valid generation identity")
@@ -660,7 +678,11 @@ func (m *CoreManager) testConfig(ctx context.Context, record *coreConfigRecord) 
 	}
 	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return exec.CommandContext(checkContext, m.binary, "run", "-test", "-config", m.configPath(record)).Run()
+	return runCoreConfigTest(checkContext, m.binary, m.configPath(record))
+}
+
+func runCoreConfigTest(ctx context.Context, binary, configPath string) error {
+	return exec.CommandContext(ctx, binary, "run", "-test", "-config", configPath).Run()
 }
 
 func (m *CoreManager) rollback(ctx context.Context, code string) error {

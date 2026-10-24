@@ -24,8 +24,9 @@ var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[8
 
 type machineEditor struct {
 	protocol.MachineView
-	Quota storage.MachineQuotaSummary
-	Exit  *storage.ExitRecord
+	Quota   storage.MachineQuotaSummary
+	Exit    *storage.ExitRecord
+	Upgrade *protocol.UpgradeIntent
 }
 
 func (s *Server) handleMachinesPage(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +58,17 @@ func (s *Server) handleMachinesPage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Exit 状态暂时不可用。", http.StatusInternalServerError)
 			return
 		}
-		views = append(views, machineEditor{MachineView: storage.MachineViewFromRecord(machine), Quota: quota, Exit: exit})
+		upgrades, upgradeErr := s.store.ListUpgradeIntents(r.Context(), machine.MachineID)
+		if upgradeErr != nil {
+			http.Error(w, "升级状态暂时不可用。", http.StatusInternalServerError)
+			return
+		}
+		var upgrade *protocol.UpgradeIntent
+		if len(upgrades) > 0 {
+			latest := upgrades[0]
+			upgrade = &latest
+		}
+		views = append(views, machineEditor{MachineView: storage.MachineViewFromRecord(machine), Quota: quota, Exit: exit, Upgrade: upgrade})
 	}
 	authority, err := s.store.GetPanelAuthority(r.Context())
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 
 	"panel-agent.local/panel-agent/internal/control"
 	"panel-agent.local/panel-agent/internal/install"
+	"panel-agent.local/panel-agent/internal/protocol"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -29,7 +30,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control admin init | control serve | control cleanup")
+		return errors.New("用法：control admin init | control serve | control update | control version | control cleanup")
 	}
 	switch args[0] {
 	case "admin":
@@ -39,11 +40,55 @@ func run(args []string) error {
 		return runAdminInit(args[2:])
 	case "serve":
 		return runServe(args[1:])
+	case "update":
+		return runUpdate(args[1:])
+	case "version":
+		if len(args) != 1 {
+			return errors.New("用法：control version")
+		}
+		fmt.Fprintf(os.Stdout, "Panel-Agent %s\n", protocol.AgentVersion)
+		return nil
 	case "cleanup":
 		return runCleanup(args[1:])
 	default:
-		return errors.New("用法：control admin init | control serve | control cleanup")
+		return errors.New("用法：control admin init | control serve | control update | control version | control cleanup")
 	}
+}
+
+func runUpdate(args []string) error {
+	flags := flag.NewFlagSet("update", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dataDir := flags.String("data-dir", defaultDataDir(), "Panel data directory")
+	packagePath := flags.String("package", "", "local Panel executable")
+	targetVersion := flags.String("target-version", "", "target Panel version")
+	packageSHA256 := flags.String("sha256", "", "SHA-256 of the executable")
+	passwordStdin := flags.Bool("backup-password-stdin", false, "read one optional backup password line from stdin")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *packagePath == "" || *targetVersion == "" || *packageSHA256 == "" {
+		return errors.New("用法：control update --package PATH --target-version VERSION --sha256 SHA256 [--data-dir PATH] [--backup-password-stdin]")
+	}
+	password := ""
+	if *passwordStdin {
+		reader := bufio.NewReaderSize(os.Stdin, 128)
+		value, err := readPasswordLine(reader)
+		if err != nil {
+			return err
+		}
+		defer clear(value)
+		if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
+			return errors.New("备份密码输入必须只有一行")
+		}
+		password = string(value)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	result, err := control.UpdateSelf(context.Background(), control.SelfUpdateOptions{DataDir: *dataDir, PackagePath: *packagePath, PackageSHA256: *packageSHA256, TargetVersion: *targetVersion, BackupPassword: password, ExecutablePath: executable})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "Panel 已更新到 %s；完整备份：%s\n", result.Version, result.BackupPath)
+	return nil
 }
 
 func runCleanup(args []string) error {

@@ -158,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/admin/backup/export", s.handleBackupExportAPI)
 	mux.HandleFunc("POST /api/admin/backup/restore", s.handleBackupRestoreAPI)
 	mux.HandleFunc("POST /admin/machines/{machineID}/traffic-recovery-gap", s.handleTrafficRecoveryGapForm)
+	mux.HandleFunc("POST /admin/machines/{machineID}/upgrade", s.handleMachineUpgradeForm)
 	mux.HandleFunc("GET /admin/machines", s.handleMachinesPage)
 	mux.HandleFunc("GET /admin/extensions", s.handleExtensionsPage)
 	mux.HandleFunc("POST /admin/extensions/import", s.handleExtensionImport)
@@ -191,6 +192,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/admin/machines/{machineID}/exit/rotate", s.handleExitRotateAPI)
 	mux.HandleFunc("POST /api/admin/machines/{machineID}/nodes/{nodeID}/connectivity-check", s.handleNodeConnectivityCheck)
 	mux.HandleFunc("POST /api/admin/machines/{machineID}/traffic-recovery-gap", s.handleTrafficRecoveryGapAPI)
+	mux.HandleFunc("POST /api/admin/machines/{machineID}/upgrade", s.handleMachineUpgradeAPI)
 	mux.HandleFunc("GET /assets/connectivity.js", s.handleConnectivityScript)
 	mux.HandleFunc("GET /admin/groups", s.handleGroupsPage)
 	mux.HandleFunc("POST /admin/groups/{kind}", s.handleGroupForm)
@@ -235,6 +237,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/agent/status", s.handleMachineStatus)
 	mux.HandleFunc("POST /api/v1/agent/traffic/recover", s.handleTrafficRecovery)
 	mux.HandleFunc("POST /api/v1/agent/traffic", s.handleTrafficIngest)
+	mux.HandleFunc("POST /api/v1/agent/upgrade-intents", s.handleAgentUpgradeIntents)
+	mux.HandleFunc("POST /api/v1/agent/upgrade-results", s.handleAgentUpgradeResult)
 	return s.securityHeaders(s.requestGateMiddleware(accessLog(mux)))
 }
 

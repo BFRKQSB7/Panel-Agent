@@ -300,7 +300,11 @@ func (c *Client) SyncOnce(ctx context.Context) (syncErr error) {
 		if applyErr == nil && statusErr == nil && c.identity.DesiredState.TrafficReportingEnabled {
 			trafficErr = errors.Join(trafficErr, c.syncTraffic(ctx))
 		}
-		return errors.Join(applyErr, statusErr, trafficErr)
+		var upgradeErr error
+		if applyErr == nil && statusErr == nil && trafficErr == nil {
+			upgradeErr = c.syncUpgrades(ctx)
+		}
+		return errors.Join(applyErr, statusErr, trafficErr, upgradeErr)
 	}
 	return errors.New("Panel authority changed repeatedly during the sync sequence")
 }

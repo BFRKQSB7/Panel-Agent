@@ -30,7 +30,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | cleanup")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | upgrade | cleanup")
 	}
 	switch args[0] {
 	case "pair":
@@ -52,11 +52,46 @@ func run(args []string) error {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(diagnostic)
+	case "upgrade":
+		return runUpgrade(args[1:])
 	case "cleanup":
 		return runCleanup(args[1:])
 	default:
-		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | cleanup")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | upgrade | cleanup")
 	}
+}
+
+func runUpgrade(args []string) error {
+	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
+	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
+	xrayPath := flags.String("xray-path", "", "absolute path to the project-owned Xray binary")
+	packagePath := flags.String("package", "", "local official Xray ZIP or executable")
+	targetVersion := flags.String("target-version", "", "target Xray version")
+	packageSHA256 := flags.String("sha256", "", "SHA-256 of the package")
+	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *xrayPath == "" || *packagePath == "" || *targetVersion == "" || *packageSHA256 == "" {
+		return errors.New("用法：control-agent upgrade --xray-path PATH --package PATH --target-version VERSION --sha256 SHA256 [--data-dir PATH] [--ca-cert PEM]")
+	}
+	client, err := agent.LoadClient(*dataDir, *caCert)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.EnableCore(context.Background(), *xrayPath, *developmentLoopback); err != nil {
+		return err
+	}
+	intentID, err := security.NewUUID()
+	if err != nil {
+		return err
+	}
+	outcome, err := client.UpgradePackage(context.Background(), intentID, *packagePath, *targetVersion, *packageSHA256)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "Xray 已升级到 %s，Core generation=%d。\n", outcome.ActualVersion, outcome.Generation)
+	return nil
 }
 
 func runCleanup(args []string) error {
@@ -156,7 +191,7 @@ func runSync(args []string) error {
 	flags.SetOutput(io.Discard)
 	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
 	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
-	xrayPath := flags.String("xray-path", "", "absolute path to the verified Xray 26.10.21 binary")
+	xrayPath := flags.String("xray-path", "", "absolute path to the verified supported Xray binary")
 	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("用法：control-agent sync [--data-dir PATH] [--ca-cert PEM] [--xray-path PATH]")
@@ -187,7 +222,7 @@ func runAgent(args []string) error {
 	flags.SetOutput(io.Discard)
 	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
 	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
-	xrayPath := flags.String("xray-path", "", "absolute path to the verified Xray 26.10.21 binary")
+	xrayPath := flags.String("xray-path", "", "absolute path to the verified supported Xray binary")
 	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("用法：control-agent run [--data-dir PATH] [--ca-cert PEM] [--xray-path PATH]")
