@@ -11,10 +11,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
 	"panel-agent.local/panel-agent/internal/control"
+	"panel-agent.local/panel-agent/internal/install"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -27,7 +29,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control admin init | control serve")
+		return errors.New("用法：control admin init | control serve | control cleanup")
 	}
 	switch args[0] {
 	case "admin":
@@ -37,9 +39,27 @@ func run(args []string) error {
 		return runAdminInit(args[2:])
 	case "serve":
 		return runServe(args[1:])
+	case "cleanup":
+		return runCleanup(args[1:])
 	default:
-		return errors.New("用法：control admin init | control serve")
+		return errors.New("用法：control admin init | control serve | control cleanup")
 	}
+}
+
+func runCleanup(args []string) error {
+	flags := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dataDir := flags.String("data-dir", install.DefaultDataRoot+"/control", "Panel data directory")
+	logRoot := flags.String("log-root", install.DefaultLogRoot, "Panel log directory")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return errors.New("用法：control cleanup [--data-dir PATH] [--log-root PATH]")
+	}
+	result, err := install.Cleanup(*dataDir, *logRoot, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "清理完成：残留 %d 项，轮转日志 %d 项。\n", len(result.Removed), len(result.Rotated))
+	return nil
 }
 
 func runAdminInit(args []string) error {

@@ -11,11 +11,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
 	"panel-agent.local/panel-agent/internal/agent"
 	"panel-agent.local/panel-agent/internal/agent/ledger"
+	"panel-agent.local/panel-agent/internal/install"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -28,7 +30,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | cleanup")
 	}
 	switch args[0] {
 	case "pair":
@@ -50,9 +52,27 @@ func run(args []string) error {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(diagnostic)
+	case "cleanup":
+		return runCleanup(args[1:])
 	default:
-		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | cleanup")
 	}
+}
+
+func runCleanup(args []string) error {
+	flags := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dataDir := flags.String("data-dir", install.DefaultDataRoot+"/agent", "Agent data directory")
+	logRoot := flags.String("log-root", install.DefaultLogRoot, "Agent log directory")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return errors.New("用法：control-agent cleanup [--data-dir PATH] [--log-root PATH]")
+	}
+	result, err := install.Cleanup(*dataDir, *logRoot, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "清理完成：残留 %d 项，轮转日志 %d 项。\n", len(result.Removed), len(result.Rotated))
+	return nil
 }
 
 func runPair(args []string, repair bool) error {

@@ -1,5 +1,7 @@
 # Panel 管理入口
 
+Linux 安装、所有权清单、systemd 和两级卸载见 [installation.md](installation.md)。
+
 Panel 使用 Go 单体、SQLite 和内嵌页面。默认数据目录为 `./data`，本机开发监听 `127.0.0.1:8080`；未初始化管理员时，`serve` 会报错退出，不会打开管理端口，也没有可远程抢注的初始化 API。
 
 ## 本机开发

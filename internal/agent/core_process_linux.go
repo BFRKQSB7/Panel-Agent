@@ -111,8 +111,22 @@ func stopCoreProcess(ctx context.Context, process coreProcess, binary string) er
 	}
 }
 
-func startCoreCommand(binary, configPath string) (coreProcess, error) {
-	output, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+func startCoreCommand(binary, configPath string, logPaths ...string) (coreProcess, error) {
+	outputPath := os.DevNull
+	if len(logPaths) > 0 && logPaths[0] != "" {
+		outputPath = logPaths[0]
+		info, err := os.Lstat(outputPath)
+		if err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular()) {
+			return coreProcess{}, errors.New("Core log must be a regular file")
+		}
+		if err == nil && info.Mode().Perm()&0o077 != 0 {
+			return coreProcess{}, errors.New("Core log permissions must be 0600")
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return coreProcess{}, err
+		}
+	}
+	output, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return coreProcess{}, err
 	}

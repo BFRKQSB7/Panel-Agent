@@ -28,6 +28,6 @@ func stopCoreProcess(context.Context, coreProcess, string) error {
 	return errors.New("managed Core requires Linux")
 }
 
-func startCoreCommand(string, string) (coreProcess, error) {
+func startCoreCommand(string, string, ...string) (coreProcess, error) {
 	return coreProcess{}, errors.New("managed Core requires Linux")
 }

@@ -72,6 +72,7 @@ type CoreManager struct {
 	mu                  sync.Mutex
 	dir                 string
 	binary              string
+	logPath             string
 	state               coreJournal
 	developmentLoopback bool
 	ledger              *ledger.Store
@@ -111,7 +112,7 @@ func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*Core
 	if err := command.Run(); err != nil || !strings.HasPrefix(version.String(), "Xray 26.10.21 ") {
 		return nil, errors.New("Core 适配器仅接受已验证的 Xray 26.10.21")
 	}
-	m := &CoreManager{dir: dir, binary: binary, developmentLoopback: developmentLoopback}
+	m := &CoreManager{dir: dir, binary: binary, logPath: filepath.Join(dir, "core.log"), developmentLoopback: developmentLoopback}
 	if err := m.load(); err != nil {
 		return nil, err
 	}
@@ -315,7 +316,7 @@ func (m *CoreManager) start(ctx context.Context, record *coreConfigRecord, phase
 	if err := m.save(next); err != nil {
 		return coreProcess{}, err
 	}
-	process, err := startCoreCommand(m.binary, m.configPath(record))
+	process, err := startCoreCommand(m.binary, m.configPath(record), m.logPath)
 	if err != nil {
 		return coreProcess{}, err
 	}
