@@ -44,10 +44,15 @@ type NodeRecord struct {
 	NodeID    string `json:"node_id"`
 	MachineID string `json:"machine_id"`
 	NodeInput
-	PublicKey       string `json:"public_key"`
-	ShortID         string `json:"short_id"`
-	DevelopmentUUID string `json:"development_uuid,omitempty"`
-	privateKey      []byte
+	PublicKey        string `json:"public_key"`
+	ShortID          string `json:"short_id"`
+	DevelopmentUUID  string `json:"development_uuid,omitempty"`
+	ExtensionID      string `json:"extension_id,omitempty"`
+	ExtensionVersion string `json:"extension_version,omitempty"`
+	ExtensionSNI     string `json:"extension_sni,omitempty"`
+	ExtensionEnabled bool   `json:"extension_enabled"`
+	ExtensionKind    string `json:"-"`
+	privateKey       []byte
 }
 
 func normalizeNode(input NodeInput) (NodeInput, error) {
@@ -132,6 +137,9 @@ func (s *Store) ListNodes(ctx context.Context, machineID string) ([]NodeRecord, 
 		return nil, err
 	}
 	for i := range nodes {
+		if err := s.populateNodeExtension(ctx, s.db, &nodes[i]); err != nil {
+			return nil, err
+		}
 		if nodes[i].Development {
 			nodes[i].DevelopmentUUID, err = s.readDevelopmentUUID(ctx, s.db)
 			if err != nil {
@@ -186,6 +194,21 @@ func (s *Store) SaveNode(ctx context.Context, machineID, nodeID string, input No
 		return NodeRecord{}, err
 	}
 	defer tx.Rollback()
+	node, err := s.saveNodeTx(ctx, tx, machineID, nodeID, input, now)
+	if err != nil {
+		return NodeRecord{}, err
+	}
+	if err := s.refreshMachineDesiredTx(ctx, tx, machineID); err != nil {
+		return NodeRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return NodeRecord{}, err
+	}
+	return node, nil
+}
+
+func (s *Store) saveNodeTx(ctx context.Context, tx *sql.Tx, machineID, nodeID string, input NodeInput, now time.Time) (NodeRecord, error) {
+	var err error
 	machine, err := getMachineTx(ctx, tx, machineID)
 	if err != nil {
 		return NodeRecord{}, err
@@ -265,12 +288,6 @@ func (s *Store) SaveNode(ctx context.Context, machineID, nodeID string, input No
 	if err != nil {
 		return NodeRecord{}, fmt.Errorf("persist Node: %w", err)
 	}
-	if err := s.refreshMachineDesiredTx(ctx, tx, machineID); err != nil {
-		return NodeRecord{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return NodeRecord{}, err
-	}
 	node.NodeID, node.MachineID, node.NodeInput = nodeID, machineID, input
 	return node, nil
 }
@@ -292,6 +309,9 @@ func (s *Store) DeleteNode(ctx context.Context, machineID, nodeID string, now ti
 	}
 	if count != 1 {
 		return ErrNodeNotFound
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM node_extensions WHERE node_id = ? AND machine_id = ?", nodeID, machineID); err != nil {
+		return err
 	}
 	if err := s.refreshMachineDesiredTx(ctx, tx, machineID); err != nil {
 		return err
@@ -346,6 +366,15 @@ func (s *Store) refreshMachineDesiredTxMode(ctx context.Context, tx *sql.Tx, mac
 				return err
 			}
 			desired.Credentials = append(desired.Credentials, protocol.ProxyCredential{UserID: "development", UUID: uuid, Email: "development-" + node.NodeID, Development: true})
+		}
+		extension, extensionEnabled, err := s.nodeExtensionTx(ctx, tx, node.NodeID)
+		if err != nil {
+			return err
+		}
+		desired.Extension = extension
+		if extension != nil {
+			desired.Reality = protocol.RealityConfig{}
+			desired.Enabled = desired.Enabled && extensionEnabled
 		}
 		state.Nodes = append(state.Nodes, desired)
 	}

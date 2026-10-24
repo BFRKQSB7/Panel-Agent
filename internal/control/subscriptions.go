@@ -18,13 +18,14 @@ const singBoxRealityUnsupported = "sing-box 1.14.3 无法与固定 Xray 26.10.21
 // MachineRecord: they also carry topology and management-only identity fields.
 type subscriptionNode struct {
 	ID, Name, Host, ServerName, PublicKey, ShortID string
+	ExtensionKind, ExtensionSNI                    string
 	Port                                           int
 }
 
 func subscriptionNodes(access storage.UserAccess) []subscriptionNode {
 	nodes := make([]subscriptionNode, 0, len(access.Nodes))
 	for _, n := range access.Nodes {
-		nodes = append(nodes, subscriptionNode{ID: n.NodeID, Name: n.Name, Host: n.PublicHost, Port: n.PublicPort, ServerName: n.ServerName, PublicKey: n.PublicKey, ShortID: n.ShortID})
+		nodes = append(nodes, subscriptionNode{ID: n.NodeID, Name: n.Name, Host: n.PublicHost, Port: n.PublicPort, ServerName: n.ServerName, PublicKey: n.PublicKey, ShortID: n.ShortID, ExtensionKind: n.ExtensionKind, ExtensionSNI: n.ExtensionSNI})
 	}
 	return nodes
 }
@@ -32,6 +33,13 @@ func subscriptionNodes(access storage.UserAccess) []subscriptionNode {
 func nodeURIAddress(n subscriptionNode) string { return net.JoinHostPort(n.Host, strconv.Itoa(n.Port)) }
 
 func nodeURI(n subscriptionNode, uuid string) string {
+	if n.ExtensionKind == "trojan_tls" {
+		u := url.URL{Scheme: "trojan", User: url.User(uuid), Host: nodeURIAddress(n), RawQuery: url.Values{"security": {"tls"}, "sni": {n.ExtensionSNI}, "allowInsecure": {"0"}, "type": {"tcp"}}.Encode(), Fragment: n.Name}
+		return u.String()
+	}
+	if n.ExtensionKind != "" {
+		return ""
+	}
 	query := url.Values{"encryption": {"none"}, "security": {"reality"}, "sni": {n.ServerName}, "fp": {"chrome"}, "pbk": {n.PublicKey}, "sid": {n.ShortID}, "type": {"tcp"}}
 	u := url.URL{Scheme: "vless", User: url.User(uuid), Host: nodeURIAddress(n), RawQuery: query.Encode(), Fragment: n.Name}
 	return u.String()
@@ -40,6 +48,12 @@ func nodeURI(n subscriptionNode, uuid string) string {
 // Rendering a proxy is separate from the import preset (listeners, selection
 // group and routing). JSON is a YAML subset accepted by the native Mihomo CLI.
 func mihomoProxy(n subscriptionNode, uuid string) map[string]any {
+	if n.ExtensionKind == "trojan_tls" {
+		return map[string]any{"name": n.Name + " · " + n.ID, "type": "trojan", "server": n.Host, "port": n.Port, "password": uuid, "sni": n.ExtensionSNI, "tls": true, "udp": false}
+	}
+	if n.ExtensionKind != "" {
+		return nil
+	}
 	return map[string]any{
 		"name": n.Name + " · " + n.ID, "type": "vless", "server": n.Host, "port": n.Port,
 		"uuid": uuid, "udp": true, "network": "tcp", "tls": true, "servername": n.ServerName,
@@ -51,6 +65,9 @@ func mihomoPreset(nodes []subscriptionNode, uuid string) map[string]any {
 	proxies, names := []map[string]any{}, []string{}
 	for _, n := range nodes {
 		proxy := mihomoProxy(n, uuid)
+		if proxy == nil {
+			continue
+		}
 		proxies = append(proxies, proxy)
 		names = append(names, proxy["name"].(string))
 	}

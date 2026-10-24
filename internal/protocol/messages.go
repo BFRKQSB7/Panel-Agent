@@ -51,6 +51,16 @@ type DesiredNode struct {
 	Reality       RealityConfig     `json:"reality"`
 	Credentials   []ProxyCredential `json:"credentials"`
 	ExitMachineID string            `json:"exit_machine_id,omitempty"`
+	Extension     *ExtensionNode    `json:"extension,omitempty"`
+}
+
+type ExtensionNode struct {
+	ID             string `json:"id"`
+	Version        string `json:"version"`
+	Kind           string `json:"kind"`
+	SNI            string `json:"sni"`
+	CertificatePEM string `json:"certificate_pem"`
+	PrivateKeyPEM  string `json:"private_key_pem"`
 }
 
 type RealityConfig struct {

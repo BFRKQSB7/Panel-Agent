@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>协议扩展</title>
+  <style>
+    body{font:16px system-ui,sans-serif;max-width:64rem;margin:3rem auto;padding:0 1rem;color:#17202a}
+    article,section{border:1px solid #9aa4ad;border-radius:.5rem;padding:1rem;margin:1rem 0}
+    form{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center;margin:.8rem 0}input,button{font:inherit;padding:.55rem;border:1px solid #9aa4ad;border-radius:.3rem}button{background:#17202a;color:white;cursor:pointer}.danger{background:#8f2424}.muted{color:#58636d}code{overflow-wrap:anywhere}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>协议扩展</h1>
+    <p><a href="/admin">返回设置</a> · <a href="/admin/machines">机器管理</a></p>
+    <p class="muted">扩展包只接受固定声明式字段和白名单 renderer。Panel 不执行脚本、动态库、Shell、网络请求或任意 Xray JSON；导入后默认停用。</p>
+    <section>
+      <h2>导入扩展 ZIP</h2>
+      <p class="muted">ZIP 只能包含一个 <code>package.json</code>，压缩大小、展开大小、条目数量、路径和特殊文件均受限。可用 <code>examples/extensions/trojan-tls-v1/package.json</code> 制作示例包。</p>
+      <form method="post" action="/admin/extensions/import" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="file" name="package" accept=".zip,application/zip" required>
+        <button type="submit">导入并静态验证</button>
+      </form>
+    </section>
+    {{if not .Extensions}}<p>尚未导入扩展。</p>{{end}}
+    {{range .Extensions}}
+    <article>
+      <h2>{{.Name}} <code>{{.ID}}@{{.Version}}</code></h2>
+      <p>{{.Description}}</p>
+      <p>状态：{{if .Enabled}}已启用{{else}}已停用{{end}}；Core：{{.Package.Manifest.Core.Kind}} ≥ {{.Package.Manifest.Core.MinVersion}}；能力：Direct={{.Package.Manifest.Capabilities.Direct}}，URI={{.Package.Manifest.Capabilities.URI}}，Mihomo={{.Package.Manifest.Capabilities.Mihomo}}，One-Hop={{.Package.Manifest.Capabilities.OneHop}}</p>
+      <p>字段：{{range .Package.Schema.Fields}}<code>{{.Name}}</code>（{{.Label}}，{{if .Secret}}秘密{{else}}公开{{end}}） {{end}}</p>
+      {{if .Enabled}}
+      <form method="post" action="/admin/extensions/{{.ID}}/{{.Version}}/disable"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">停用（保留已有 Node 定义）</button></form>
+      {{else}}
+      <form method="post" action="/admin/extensions/{{.ID}}/{{.Version}}/enable"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">启用</button></form>
+      {{end}}
+      <form method="post" action="/admin/extensions/{{.ID}}/{{.Version}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit">删除（被 Node 引用时拒绝）</button></form>
+    </article>
+    {{end}}
+  </main>
+</body>
+</html>

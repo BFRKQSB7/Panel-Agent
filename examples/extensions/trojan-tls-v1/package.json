@@ -1,0 +1,32 @@
+{
+  "manifest": {
+    "id": "trojan-tls-v1",
+    "version": "1.0.0",
+    "name": "Trojan TLS（受限示例）",
+    "description": "使用项目受控内联证书的 Trojan/TCP/TLS 示例；不支持 One-Hop 或 sing-box。",
+    "core": {
+      "kind": "xray",
+      "min_version": "26.10.21"
+    },
+    "capabilities": {
+      "direct": true,
+      "one_hop": false,
+      "uri": true,
+      "mihomo": true,
+      "sing_box": false,
+      "certificate": true
+    }
+  },
+  "schema": {
+    "fields": [
+      {"name": "sni", "type": "host", "label": "TLS SNI", "required": true, "secret": false, "max": 253},
+      {"name": "certificate_pem", "type": "pem", "label": "TLS 证书 PEM", "required": true, "secret": true, "max": 65536},
+      {"name": "private_key_pem", "type": "private_key_pem", "label": "TLS 私钥 PEM", "required": true, "secret": true, "max": 65536}
+    ]
+  },
+  "renderers": {
+    "xray": {"kind": "trojan_tls", "protocol": "trojan", "network": "tcp", "tls": true},
+    "uri": {"kind": "trojan_tls", "enabled": true},
+    "mihomo": {"kind": "trojan_tls", "enabled": true}
+  }
+}

@@ -86,6 +86,36 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 		if developmentLoopback && onlyDevelopment {
 			developmentTags = append(developmentTags, "node-"+node.ID)
 		}
+		if node.Extension != nil {
+			clients = []any{}
+			for _, credential := range activeCredentials {
+				if credential.ExpiresAt != "" {
+					expiry, _ := time.Parse(time.RFC3339, credential.ExpiresAt)
+					if !time.Now().Before(expiry) {
+						continue
+					}
+				}
+				clients = append(clients, map[string]any{"password": credential.UUID, "email": credential.Email, "level": 0})
+			}
+			inbounds = append(inbounds, map[string]any{
+				"tag": "node-" + node.ID, "listen": node.ListenHost, "port": node.ListenPort, "protocol": "trojan",
+				"settings": map[string]any{"clients": clients},
+				"streamSettings": map[string]any{"network": "tcp", "security": "tls", "tlsSettings": map[string]any{
+					"certificates": []any{map[string]any{"certificate": []string{node.Extension.CertificatePEM}, "key": []string{node.Extension.PrivateKeyPEM}}},
+				}},
+			})
+			listenHost := node.ListenHost
+			if ip := net.ParseIP(listenHost); ip.IsUnspecified() {
+				if ip.To4() != nil {
+					listenHost = "127.0.0.1"
+				} else {
+					listenHost = "::1"
+				}
+			}
+			result.Listeners = append(result.Listeners, net.JoinHostPort(listenHost, strconv.Itoa(node.ListenPort)))
+			result.Bindings = append(result.Bindings, net.JoinHostPort(node.ListenHost, strconv.Itoa(node.ListenPort)))
+			continue
+		}
 		inbounds = append(inbounds, map[string]any{
 			"tag": "node-" + node.ID, "listen": node.ListenHost, "port": node.ListenPort, "protocol": "vless",
 			"settings": map[string]any{"clients": clients, "decryption": "none"},

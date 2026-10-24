@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -104,6 +105,24 @@ func validateTransitOutbound(outbound TransitOutbound) error {
 	return nil
 }
 
+func validateExtension(extension ExtensionNode) error {
+	if !ValidText(extension.ID, 64) || !ValidText(extension.Version, 32) || extension.Kind != "trojan_tls" {
+		return errors.New("扩展身份或类型无效")
+	}
+	if _, err := NormalizeHost(extension.SNI); err != nil || net.ParseIP(extension.SNI) != nil {
+		return errors.New("扩展 SNI 必须是域名")
+	}
+	if len(extension.CertificatePEM) == 0 || len(extension.CertificatePEM) > 65536 || len(extension.PrivateKeyPEM) == 0 || len(extension.PrivateKeyPEM) > 65536 {
+		return errors.New("扩展证书或私钥大小无效")
+	}
+	certificate, _ := pem.Decode([]byte(extension.CertificatePEM))
+	privateKey, _ := pem.Decode([]byte(extension.PrivateKeyPEM))
+	if certificate == nil || certificate.Type != "CERTIFICATE" || privateKey == nil || privateKey.Type != "PRIVATE KEY" && privateKey.Type != "RSA PRIVATE KEY" && privateKey.Type != "EC PRIVATE KEY" {
+		return errors.New("扩展证书或私钥 PEM 无效")
+	}
+	return nil
+}
+
 func ValidateDesiredState(state DesiredState) error {
 	if err := state.QuotaRestrictions.Validate(); err != nil {
 		return err
@@ -169,7 +188,17 @@ func ValidateDesiredState(state DesiredState) error {
 		}
 		ports[node.ListenPort] = true
 		if err := validateReality(node.Reality); err != nil {
-			return err
+			if node.Extension == nil {
+				return err
+			}
+		}
+		if node.Extension != nil {
+			if err := validateExtension(*node.Extension); err != nil {
+				return err
+			}
+			if node.ExitMachineID != "" {
+				return errors.New("当前扩展不支持 One-Hop Exit")
+			}
 		}
 		if node.ExitMachineID != "" && (!security.IsUUIDv4(node.ExitMachineID) || node.Enabled && !outbounds[node.ExitMachineID]) {
 			return errors.New("Node 的 Exit 路由未准备好")

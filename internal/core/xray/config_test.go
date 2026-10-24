@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
 	"panel-agent.local/panel-agent/internal/security"
@@ -220,5 +221,54 @@ func TestRenderOneHopExitUsesTransitRouteWithoutDirectFallback(t *testing.T) {
 	entryState.TransitOutbounds = nil
 	if _, err := RenderConfig(entryState); err == nil {
 		t.Fatal("enabled one-hop Node silently fell back without a Transit outbound")
+	}
+}
+
+func TestRenderDeclarativeTrojanExtensionUsesFixedTLSShape(t *testing.T) {
+	nodeID, _ := security.NewUUID()
+	userID, _ := security.NewUUID()
+	userUUID, _ := security.NewUUID()
+	expiredUUID, _ := security.NewUUID()
+	state := protocol.DesiredState{Nodes: []protocol.DesiredNode{{
+		ID: nodeID, Name: "trojan-extension", PublicHost: "edge.example.test", PublicPort: 443,
+		ListenHost: "127.0.0.1", ListenPort: 18443, Enabled: true,
+		Extension:   &protocol.ExtensionNode{ID: "trojan-tls-v1", Version: "1.0.0", Kind: "trojan_tls", SNI: "edge.example.test", CertificatePEM: "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----", PrivateKeyPEM: "-----BEGIN RSA PRIVATE KEY-----\nAA==\n-----END RSA PRIVATE KEY-----"},
+		Credentials: []protocol.ProxyCredential{{UserID: userID, UUID: userUUID, Email: "trojan-user"}, {UserID: "expired-user", UUID: expiredUUID, Email: "expired-trojan-user", ExpiresAt: time.Now().Add(-time.Minute).Format(time.RFC3339)}},
+	}}}
+	rendered, err := RenderConfig(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Inbounds []struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Clients []struct {
+					Password string `json:"password"`
+				} `json:"clients"`
+			} `json:"settings"`
+			StreamSettings struct {
+				Network  string `json:"network"`
+				Security string `json:"security"`
+				TLS      struct {
+					Certificates []struct {
+						Certificate []string `json:"certificate"`
+						Key         []string `json:"key"`
+					} `json:"certificates"`
+				} `json:"tlsSettings"`
+			} `json:"streamSettings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(rendered.Bytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Inbounds) != 1 || len(config.Inbounds[0].Settings.Clients) != 1 || config.Inbounds[0].Settings.Clients[0].Password != userUUID {
+		t.Fatalf("expired Trojan credential was not filtered: %+v", config.Inbounds)
+	}
+	if len(config.Inbounds) != 1 || config.Inbounds[0].Protocol != "trojan" || config.Inbounds[0].Settings.Clients[0].Password != userUUID || config.Inbounds[0].StreamSettings.Network != "tcp" || config.Inbounds[0].StreamSettings.Security != "tls" || len(config.Inbounds[0].StreamSettings.TLS.Certificates) != 1 || len(rendered.Mappings) != 1 {
+		t.Fatalf("extension renderer shape = %+v", config.Inbounds)
+	}
+	if bytes.Contains(rendered.Bytes, []byte("vless")) {
+		t.Fatal("extension renderer fell back to built-in VLESS")
 	}
 }

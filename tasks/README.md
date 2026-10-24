@@ -3,7 +3,7 @@
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
 CURRENT MILESTONE: M4 — 一跳、教程与扩展
-RECOMMENDED NEXT TASK: [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md)
+RECOMMENDED NEXT TASK: [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md)
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
@@ -21,7 +21,7 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 | [D10 — 三维配额、限制状态与真实用量页面](D10-quotas-and-usage-ui.md) | M3 | DONE | high | D06, D09 | 三维配额/预算持久化、限制原因与到期时间快照、离线/待对账围栏、Agent 应用回报、管理 API/表单与真实用量页完成；定向/全量 Go 测试及 vet 通过。 |
 | [D11 — 隐藏 Exit、一跳转发与扣账归属](D11-one-hop-exit.md) | M4 | PARTIAL | high | D10 | VLESS + REALITY + RAW 隐藏 Exit、独立 Transit 凭证、跨机就绪门控、轮换/吊销/硬停 Fail Closed、machine_only_transit 账本、管理 UI/API 与订阅隔离完成；Go 全量测试与 vet 通过。真实双机 TCP/UDP、NAT 可达性、出口故障断流未验：当前只有一台可核对测试机且无 D11 smoke。 |
 | [D12 — 动态 NAT/DNS 教程与有限连通性检查](D12-nat-dns-guidance.md) | M4 | DONE | high | D06 | 节点详情动态生成 NAT/DNS/Reality/Agent/Core 引导，复制按钮与 `public/local` 有限 TCP 检查完成；一次 DNS 解析绑定地址，拒绝私网、回环、mapped IPv6 与 DNS 重绑定；Go 全量测试/vet、CSP 回归及真实浏览器剪贴板/API smoke 通过。 |
-| [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md) | M4 | READY | high | D06 | — |
+| [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md) | M4 | DONE | high | D06 | 受限 ZIP 声明式包、固定 Trojan/TCP/TLS Xray 与 URI/Mihomo renderer、加密 secret、Node 显式版本引用、启停/删除引用保护、管理页面与规范完成；Xray 26.10.21 `run -test`、浏览器管理 smoke、Go 全量测试/vet、diff check 通过。公网代理握手与证书链未在本项宣称验证。 |
 | [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md) | M5 | READY | high | D04 | — |
 | [D15 — 手动 Core 升级与 CLI 更新回滚](D15-manual-upgrade-rollback.md) | M5 | WAITING | max | D16 | — |
 | [D16 — 一致性备份、恢复与 Agent 重连](D16-backup-restore-reconcile.md) | M5 | WAITING | max | D09, D13, D14 | — |

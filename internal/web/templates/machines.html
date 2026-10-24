@@ -15,7 +15,7 @@
 <body>
   <main>
     <h1>机器管理</h1>
-    <p><a href="/admin">返回设置</a></p>
+    <p><a href="/admin">返回设置</a> · <a href="/admin/extensions">协议扩展</a></p>
     <p>当前 authority：<code>{{.Authority.Epoch}}</code>，revision {{.Authority.Revision}}。</p>
     <form method="post" action="/admin/join-tokens">
       <input type="hidden" name="csrf" value="{{.CSRF}}">

@@ -64,6 +64,8 @@ $joinToken | .\control-agent.exe pair --panel-url $panelUrl --data-dir C:\panel-
 
 页面上的“检查公网 TCP”使用 `public` 模式，适用于公网域名或公网字面 IP；“检查本机回环”仅接受字面回环地址，不解析域名。检查有固定的 DNS、拨号超时和并发上限，不接受任意 URL、重定向或元数据目标；成功只表示所选地址的 TCP 监听可达，不能证明 Agent 在线、Core 已应用、Reality 握手、UDP、订阅内容或最终出站链路已经验收。自动化管理员可调用 `POST /api/admin/machines/{machineID}/nodes/{nodeID}/connectivity-check`，提交 `{"mode":"public"}` 或 `{"mode":"local"}`，响应分别给出 `dns`、`tcp`、`resolved_ip`、`target` 和 `ok`；DNS 目标被拒绝时返回 422，其他检查结果返回 200。
 
+协议扩展的包格式、导入限制、秘密字段和生命周期见 [声明式协议扩展格式](protocol-extension.md)。扩展导入后默认停用；节点必须显式选择固定版本，停用保留 Node 定义但阻断 Core/订阅，带引用删除会拒绝。
+
 Linux Agent 使用已验证的 Xray **26.10.21** 可执行文件。以下命令中的路径由管理员提供；此阶段不会下载或安装 Core：
 
 ```sh

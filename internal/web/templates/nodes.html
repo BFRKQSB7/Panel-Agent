@@ -40,6 +40,8 @@
       <form class="fields" method="post" action="/admin/machines/{{.Machine.MachineID}}/nodes">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         {{template "node-fields" .NewNode}}
+        <label>协议扩展 <select name="extension_id"><option value="">内置 VLESS + Reality</option>{{range .Extensions}}<option value="{{.ID}}@{{.Version}}">{{.Name}} @{{.Version}}{{if .Enabled}}（已启用）{{else}}（已停用）{{end}}</option>{{end}}</select></label>
+        {{range .Extensions}}{{$extension := .}}<fieldset><legend>{{$extension.Name}} @{{$extension.Version}} 字段</legend>{{range $extension.Package.Schema.Fields}}{{if .Secret}}<label>{{.Label}} <textarea name="extension_{{$extension.ID}}_{{$extension.Version}}_{{.Name}}" maxlength="{{.Max}}" placeholder="仅在选择此扩展时填写；已保存秘密可留空保留"></textarea></label>{{else}}<label>{{.Label}} <input name="extension_{{$extension.ID}}_{{$extension.Version}}_{{.Name}}" maxlength="{{.Max}}"></label>{{end}}{{end}}</fieldset>{{end}}
         <label>出口 <select name="exit_machine_id"><option value="">本机直出</option>{{range .Exits}}<option value="{{.MachineID}}">{{.DisplayName}} · {{.PublicHost}}:{{.PublicPort}}{{if .Ready}}（已就绪）{{else}}（未就绪，入口将保持阻断）{{end}}</option>{{end}}</select></label>
         <button type="submit">创建节点</button>
       </form>
@@ -49,10 +51,13 @@
     <article>
       <h2>{{.Name}}</h2>
       <p>节点 ID：<code>{{.NodeID}}</code>；公钥：<code>{{.PublicKey}}</code>；Short ID：<code>{{.ShortID}}</code></p>
+      {{if .ExtensionID}}<p>协议扩展：<code>{{.ExtensionID}}@{{.ExtensionVersion}}</code>，SNI：<code>{{.ExtensionSNI}}</code>；状态：{{if .ExtensionEnabled}}已启用{{else}}已停用，Node 定义保留但不会进入 Core/订阅{{end}}</p>{{end}}
       {{if .Development}}<p class="development">此节点启用了开发凭证，测试 UUID：<code>{{.DevelopmentUUID}}</code>。测试完成后关闭该选项。</p>{{end}}
       <form class="fields" method="post" action="/admin/machines/{{$.Machine.MachineID}}/nodes/{{.NodeID}}">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         {{template "node-fields" .NodeInput}}
+        <label>协议扩展 <select name="extension_id"><option value="" {{if not .ExtensionID}}selected{{end}}>内置 VLESS + Reality</option>{{range $.Extensions}}<option value="{{.ID}}@{{.Version}}" {{if and (eq $node.ExtensionID .ID) (eq $node.ExtensionVersion .Version)}}selected{{end}}>{{.Name}} @{{.Version}}{{if .Enabled}}（已启用）{{else}}（已停用）{{end}}</option>{{end}}</select></label>
+        {{range $.Extensions}}{{$extension := .}}<fieldset><legend>{{$extension.Name}} @{{$extension.Version}} 字段</legend>{{range $extension.Package.Schema.Fields}}{{if .Secret}}<label>{{.Label}} <textarea name="extension_{{$extension.ID}}_{{$extension.Version}}_{{.Name}}" maxlength="{{.Max}}" placeholder="已保存秘密可留空保留"></textarea></label>{{else}}<label>{{.Label}} <input name="extension_{{$extension.ID}}_{{$extension.Version}}_{{.Name}}" maxlength="{{.Max}}"></label>{{end}}{{end}}</fieldset>{{end}}
         <label>出口 <select name="exit_machine_id"><option value="">本机直出</option>{{range $.Exits}}<option value="{{.MachineID}}" {{if eq $node.ExitMachineID .MachineID}}selected{{end}}>{{.DisplayName}} · {{.PublicHost}}:{{.PublicPort}}{{if .Ready}}（已就绪）{{else}}（未就绪，入口将保持阻断）{{end}}</option>{{end}}</select></label>
         <button type="submit">保存节点</button>
       </form>

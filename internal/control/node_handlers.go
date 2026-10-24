@@ -1,10 +1,12 @@
 package control
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
@@ -31,6 +33,11 @@ func (s *Server) handleNodesPage(w http.ResponseWriter, r *http.Request) {
 		writeNodeError(w, err)
 		return
 	}
+	extensions, err := s.store.ListExtensions(r.Context())
+	if err != nil {
+		http.Error(w, "协议扩展暂时不可用。", http.StatusInternalServerError)
+		return
+	}
 	guides := make(map[string]nodeGuide, len(nodes))
 	machineView := storage.MachineViewFromRecord(machine)
 	for _, node := range nodes {
@@ -38,7 +45,7 @@ func (s *Server) handleNodesPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = s.templates.ExecuteTemplate(w, "nodes.html", map[string]any{
-		"CSRF": session.csrf, "Machine": machineView, "Nodes": nodes, "Exits": exits, "Guides": guides,
+		"CSRF": session.csrf, "Machine": machineView, "Nodes": nodes, "Exits": exits, "Guides": guides, "Extensions": extensions,
 		"NewNode": storage.NodeInput{Enabled: true, ListenHost: "0.0.0.0", ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443"},
 	})
 }
@@ -48,7 +55,7 @@ func (s *Server) handleNodeForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	form, err := readForm(w, r)
+	form, err := readFormWithLimit(w, r, 64<<10)
 	if err != nil || !s.csrfValid(r, session.csrf, form.Get("csrf")) {
 		http.Error(w, "请求校验失败", http.StatusForbidden)
 		return
@@ -60,17 +67,42 @@ func (s *Server) handleNodeForm(w http.ResponseWriter, r *http.Request) {
 		writeNodeError(w, err)
 		return
 	}
-	_, err = s.store.SaveNode(r.Context(), r.PathValue("machineID"), r.PathValue("nodeID"), storage.NodeInput{
+	assignment, err := s.nodeExtensionAssignment(r.Context(), form)
+	if err != nil {
+		writeNodeError(w, err)
+		return
+	}
+	_, err = s.store.SaveNodeWithExtension(r.Context(), r.PathValue("machineID"), r.PathValue("nodeID"), storage.NodeInput{
 		Name: form.Get("name"), PublicHost: form.Get("public_host"), PublicPort: publicPort,
 		ListenHost: form.Get("listen_host"), ListenPort: listenPort, Enabled: form.Get("enabled") == "true",
 		ServerName: form.Get("server_name"), Target: form.Get("target"), Development: form.Get("development") == "true", QuotaBytes: quota,
 		ExitMachineID: form.Get("exit_machine_id"),
-	}, time.Now())
+	}, assignment, time.Now())
 	if err != nil {
 		writeNodeError(w, err)
 		return
 	}
 	http.Redirect(w, r, "/admin/machines/"+url.PathEscape(r.PathValue("machineID"))+"/nodes", http.StatusSeeOther)
+}
+
+func (s *Server) nodeExtensionAssignment(ctx context.Context, form url.Values) (*storage.NodeExtensionInput, error) {
+	ref := strings.TrimSpace(form.Get("extension_id"))
+	if ref == "" {
+		return nil, nil
+	}
+	id, version, ok := strings.Cut(ref, "@")
+	if !ok || id == "" || version == "" {
+		return nil, storage.ErrInvalidExtension
+	}
+	record, err := s.store.GetExtension(ctx, id, version)
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]string, len(record.Package.Schema.Fields))
+	for _, field := range record.Package.Schema.Fields {
+		values[field.Name] = form.Get("extension_" + id + "_" + version + "_" + field.Name)
+	}
+	return &storage.NodeExtensionInput{ID: id, Version: version, Values: values}, nil
 }
 
 func (s *Server) handleNodeDeleteForm(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +182,12 @@ func writeNodeError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, storage.ErrMachineAuthentication):
 		http.Error(w, "机器凭据已吊销，请重新配对后再变更节点。", http.StatusConflict)
+	case errors.Is(err, storage.ErrExtensionNotFound):
+		http.Error(w, "协议扩展不存在。", http.StatusNotFound)
+	case errors.Is(err, storage.ErrExtensionDisabled):
+		http.Error(w, "协议扩展已停用，不能新建依赖。", http.StatusConflict)
+	case errors.Is(err, storage.ErrExtensionReferenced), errors.Is(err, storage.ErrInvalidExtension):
+		http.Error(w, "协议扩展配置无效或仍被引用。", http.StatusBadRequest)
 	default:
 		http.Error(w, "节点操作暂时无法完成。", http.StatusInternalServerError)
 	}

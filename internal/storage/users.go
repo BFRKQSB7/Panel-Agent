@@ -299,6 +299,12 @@ func (s *Store) GetUserAccess(ctx context.Context, id string, now time.Time) (Us
 		if err != nil {
 			return UserAccess{}, err
 		}
+		if err := s.populateNodeExtension(ctx, tx, &node); err != nil {
+			return UserAccess{}, err
+		}
+		if node.ExtensionID != "" && !node.ExtensionEnabled {
+			continue
+		}
 		access.Nodes = append(access.Nodes, node)
 	}
 	return access, tx.Commit()
