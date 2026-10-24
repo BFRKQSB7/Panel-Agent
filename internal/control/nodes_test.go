@@ -62,6 +62,15 @@ func TestNodeAdminFormsMachineScopeAndRepair(t *testing.T) {
 	}
 	a, agentDirA := pair()
 	b, agentDirB := pair()
+	exitForm := url.Values{
+		"csrf": {csrf}, "public_host": {"exit.example.test"}, "public_port": {"45100"},
+		"listen_host": {"127.0.0.1"}, "listen_port": {"19443"}, "server_name": {"www.cloudflare.com"}, "target": {"www.cloudflare.com:443"},
+	}
+	response := postForm(t, admin, httpServer.URL+"/admin/machines/"+b+"/exit", exitForm, httpServer.URL)
+	response.Body.Close()
+	if response.StatusCode != http.StatusSeeOther {
+		t.Fatalf("Exit form returned %d", response.StatusCode)
+	}
 	pageURL := httpServer.URL + "/admin/machines/" + a + "/nodes"
 	page, err := admin.Get(pageURL)
 	if err != nil {
@@ -76,9 +85,9 @@ func TestNodeAdminFormsMachineScopeAndRepair(t *testing.T) {
 	form := url.Values{
 		"csrf": {csrf}, "name": {"Reality A"}, "public_host": {"node.example.test"}, "public_port": {"45001"},
 		"listen_host": {"127.0.0.1"}, "listen_port": {"18443"}, "server_name": {"www.cloudflare.com"}, "target": {"www.cloudflare.com:443"},
-		"enabled": {"true"}, "development": {"true"},
+		"enabled": {"true"}, "development": {"true"}, "exit_machine_id": {b},
 	}
-	response := postForm(t, admin, pageURL, form, httpServer.URL)
+	response = postForm(t, admin, pageURL, form, httpServer.URL)
 	response.Body.Close()
 	if response.StatusCode != http.StatusSeeOther {
 		t.Fatalf("Node form returned %d", response.StatusCode)
@@ -149,9 +158,9 @@ func TestNodeAdminFormsMachineScopeAndRepair(t *testing.T) {
 		clientA.Close()
 		t.Fatal(err)
 	}
-	if len(clientA.Identity().DesiredState.Nodes) != 1 || clientA.Identity().DesiredState.Nodes[0].ID != node.NodeID {
+	if len(clientA.Identity().DesiredState.Nodes) != 1 || clientA.Identity().DesiredState.Nodes[0].ID != node.NodeID || clientA.Identity().DesiredState.Nodes[0].ExitMachineID != b || clientA.Identity().DesiredState.Nodes[0].Enabled {
 		clientA.Close()
-		t.Fatal("A did not receive its Node snapshot")
+		t.Fatal("A did not receive the fail-closed one-hop Node snapshot")
 	}
 	clientA.Close()
 	clientB, err := agent.LoadClient(agentDirB, caPath)

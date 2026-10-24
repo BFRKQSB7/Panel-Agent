@@ -32,6 +32,18 @@
       <h2>{{.DisplayName}}</h2>
       <p>机器 ID：<code>{{.MachineID}}</code></p>
       <p><a href="/admin/machines/{{.MachineID}}/nodes">管理 Reality 节点</a></p>
+      <p>隐藏 Exit：{{if .Exit}}已配置，公网 {{.Exit.PublicHost}}:{{.Exit.PublicPort}}，监听 {{.Exit.ListenHost}}:{{.Exit.ListenPort}}{{else}}未配置{{end}}。Exit 只接受受管 Transit 凭证，不出现在用户订阅。</p>
+      <form method="post" action="/admin/machines/{{.MachineID}}/exit">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <label>Exit 公网主机 <input name="public_host" value="{{if .Exit}}{{.Exit.PublicHost}}{{end}}" placeholder="IP 或域名" required></label>
+        <label>Exit 公网端口 <input type="number" name="public_port" value="{{if .Exit}}{{.Exit.PublicPort}}{{end}}" min="1" max="65535" required></label>
+        <label>Exit 监听 IP <input name="listen_host" value="{{if .Exit}}{{.Exit.ListenHost}}{{else}}0.0.0.0{{end}}" required></label>
+        <label>Exit 监听端口 <input type="number" name="listen_port" value="{{if .Exit}}{{.Exit.ListenPort}}{{end}}" min="1" max="65535" required></label>
+        <label>Transit Reality SNI <input name="server_name" value="{{if .Exit}}{{.Exit.ServerName}}{{else}}www.cloudflare.com{{end}}" required></label>
+        <label>Transit Reality 目标 <input name="target" value="{{if .Exit}}{{.Exit.Target}}{{else}}www.cloudflare.com:443{{end}}" required></label>
+        <button type="submit">{{if .Exit}}保存 Exit{{else}}配置 Exit{{end}}</button>
+      </form>
+      {{if .Exit}}<form method="post" action="/admin/machines/{{.MachineID}}/exit/rotate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">轮换 Transit 凭证</button></form><form method="post" action="/admin/machines/{{.MachineID}}/exit/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit">删除 Exit（仍被 Node 使用时拒绝）</button></form>{{end}}
       <p>机器 authority：<code>{{.AuthorityEpoch}}</code>；目标 revision：{{.DesiredRevision}}；收到 digest：<code>{{.ReceivedDigest}}</code></p>
       <p>主机名：{{.Hostname}}；系统：{{.OS}} / {{.Architecture}}；CPU：{{.CPUCount}}；内存：{{if .MemoryBytes}}{{.MemoryBytes}} 字节{{else}}未知{{end}}；Agent：{{.AgentVersion}}</p>
       <p>最近心跳：{{if .LastHeartbeat}}{{.LastHeartbeat}}{{else}}尚未收到{{end}}；收到 revision：{{.ReceivedRevision}}；应用 revision：{{.AppliedRevision}}；状态：{{if .Revoked}}已吊销{{else}}有效{{end}} {{if .ApplyError}}（{{.ApplyError}}）{{end}}</p>

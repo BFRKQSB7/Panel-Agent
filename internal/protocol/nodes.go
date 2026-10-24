@@ -53,6 +53,57 @@ func ValidText(text string, maximum int) bool {
 	return true
 }
 
+func validateReality(reality RealityConfig) error {
+	if _, err := NormalizeHost(reality.ServerName); err != nil || net.ParseIP(reality.ServerName) != nil {
+		return errors.New("Reality server_name 必须是域名")
+	}
+	targetHost, targetPort, err := net.SplitHostPort(reality.Target)
+	if err != nil {
+		return errors.New("Reality target 必须包含主机和端口")
+	}
+	if _, err := NormalizeHost(targetHost); err != nil {
+		return err
+	}
+	port, err := strconv.Atoi(targetPort)
+	if err != nil || port < 1 || port > 65535 {
+		return errors.New("Reality target 端口无效")
+	}
+	key, err := base64.RawURLEncoding.DecodeString(reality.PrivateKey)
+	if err != nil {
+		return errors.New("Reality private_key 编码无效")
+	}
+	private, err := ecdh.X25519().NewPrivateKey(key)
+	if err != nil || base64.RawURLEncoding.EncodeToString(private.PublicKey().Bytes()) != reality.PublicKey {
+		return errors.New("Reality 密钥不匹配")
+	}
+	shortID, err := hex.DecodeString(reality.ShortID)
+	if err != nil || len(shortID) != 8 {
+		return errors.New("Reality short_id 无效")
+	}
+	return nil
+}
+
+func validateTransitOutbound(outbound TransitOutbound) error {
+	if !security.IsUUIDv4(outbound.ExitMachineID) || !security.IsUUIDv4(outbound.UUID) {
+		return errors.New("Transit 身份无效")
+	}
+	if _, err := NormalizeHost(outbound.PublicHost); err != nil || outbound.PublicPort < 1 || outbound.PublicPort > 65535 {
+		return errors.New("Transit 公网主机或端口无效")
+	}
+	if _, err := NormalizeHost(outbound.ServerName); err != nil || net.ParseIP(outbound.ServerName) != nil {
+		return errors.New("Transit SNI 必须是域名")
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(outbound.PublicKey)
+	if err != nil || len(publicKey) != 32 {
+		return errors.New("Transit 公钥无效")
+	}
+	shortID, err := hex.DecodeString(outbound.ShortID)
+	if err != nil || len(shortID) != 8 {
+		return errors.New("Transit short_id 无效")
+	}
+	return nil
+}
+
 func ValidateDesiredState(state DesiredState) error {
 	if err := state.QuotaRestrictions.Validate(); err != nil {
 		return err
@@ -69,6 +120,42 @@ func ValidateDesiredState(state DesiredState) error {
 		return errors.New("完整快照必须包含 nodes 列表")
 	}
 	ids, ports, emails := map[string]bool{}, map[int]bool{}, map[string]bool{}
+	outbounds := map[string]bool{}
+	if state.Exit != nil {
+		exit := state.Exit
+		if !security.IsUUIDv4(exit.MachineID) || exit.PublicPort < 1 || exit.PublicPort > 65535 || net.ParseIP(exit.ListenHost) == nil || exit.ListenPort < 1 || exit.ListenPort > 65535 || exit.ListenPort == CoreStatsPort {
+			return errors.New("Exit 身份、主机或端口无效")
+		}
+		if _, err := NormalizeHost(exit.PublicHost); err != nil {
+			return errors.New("Exit 公网主机无效")
+		}
+		if ports[exit.ListenPort] {
+			return errors.New("Exit 与 Node 监听端口冲突")
+		}
+		ports[exit.ListenPort] = true
+		if err := validateReality(exit.Reality); err != nil {
+			return err
+		}
+		seenEntries, seenUUIDs := map[string]bool{}, map[string]bool{}
+		for _, credential := range exit.Credentials {
+			if !security.IsUUIDv4(credential.EntryMachineID) || credential.EntryMachineID == exit.MachineID || !security.IsUUIDv4(credential.UUID) || seenEntries[credential.EntryMachineID] || seenUUIDs[credential.UUID] || !ValidText(credential.Email, 128) || strings.Contains(credential.Email, ">") || emails[credential.Email] {
+				return errors.New("Transit 凭证无效或重复")
+			}
+			seenEntries[credential.EntryMachineID], seenUUIDs[credential.UUID], emails[credential.Email] = true, true, true
+		}
+	}
+	for _, outbound := range state.TransitOutbounds {
+		if err := validateTransitOutbound(outbound); err != nil || state.Exit != nil && outbound.ExitMachineID == state.Exit.MachineID {
+			if err != nil {
+				return err
+			}
+			return errors.New("禁止机器把自身作为 Exit")
+		}
+		if outbounds[outbound.ExitMachineID] {
+			return errors.New("Transit 出口重复")
+		}
+		outbounds[outbound.ExitMachineID] = true
+	}
 	for _, node := range state.Nodes {
 		if !security.IsUUIDv4(node.ID) || ids[node.ID] || !ValidText(node.Name, 128) {
 			return errors.New("节点身份或名称无效")
@@ -81,31 +168,11 @@ func ValidateDesiredState(state DesiredState) error {
 			return errors.New("监听地址、端口或端口唯一性无效")
 		}
 		ports[node.ListenPort] = true
-		if _, err := NormalizeHost(node.Reality.ServerName); err != nil || net.ParseIP(node.Reality.ServerName) != nil {
-			return errors.New("Reality server_name 必须是域名")
-		}
-		targetHost, targetPort, err := net.SplitHostPort(node.Reality.Target)
-		if err != nil {
-			return errors.New("Reality target 必须包含主机和端口")
-		}
-		if _, err := NormalizeHost(targetHost); err != nil {
+		if err := validateReality(node.Reality); err != nil {
 			return err
 		}
-		port, err := strconv.Atoi(targetPort)
-		if err != nil || port < 1 || port > 65535 {
-			return errors.New("Reality target 端口无效")
-		}
-		key, err := base64.RawURLEncoding.DecodeString(node.Reality.PrivateKey)
-		if err != nil {
-			return errors.New("Reality private_key 编码无效")
-		}
-		private, err := ecdh.X25519().NewPrivateKey(key)
-		if err != nil || base64.RawURLEncoding.EncodeToString(private.PublicKey().Bytes()) != node.Reality.PublicKey {
-			return errors.New("Reality 密钥不匹配")
-		}
-		shortID, err := hex.DecodeString(node.Reality.ShortID)
-		if err != nil || len(shortID) != 8 {
-			return errors.New("Reality short_id 无效")
+		if node.ExitMachineID != "" && (!security.IsUUIDv4(node.ExitMachineID) || node.Enabled && !outbounds[node.ExitMachineID]) {
+			return errors.New("Node 的 Exit 路由未准备好")
 		}
 		users, uuids := map[string]bool{}, map[string]bool{}
 		for _, credential := range node.Credentials {
@@ -119,6 +186,18 @@ func ValidateDesiredState(state DesiredState) error {
 			}
 			users[credential.UserID], emails[credential.Email] = true, true
 			uuids[credential.UUID] = true
+		}
+	}
+	for target := range outbounds {
+		used := false
+		for _, node := range state.Nodes {
+			if node.Enabled && node.ExitMachineID == target {
+				used = true
+				break
+			}
+		}
+		if !used {
+			return errors.New("Transit 出口没有对应的启用 Node")
 		}
 	}
 	return nil

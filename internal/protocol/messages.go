@@ -41,15 +41,16 @@ type ErrorDetails struct {
 const CoreStatsPort = 10085
 
 type DesiredNode struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	PublicHost  string            `json:"public_host"`
-	PublicPort  int               `json:"public_port"`
-	ListenHost  string            `json:"listen_host"`
-	ListenPort  int               `json:"listen_port"`
-	Enabled     bool              `json:"enabled"`
-	Reality     RealityConfig     `json:"reality"`
-	Credentials []ProxyCredential `json:"credentials"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	PublicHost    string            `json:"public_host"`
+	PublicPort    int               `json:"public_port"`
+	ListenHost    string            `json:"listen_host"`
+	ListenPort    int               `json:"listen_port"`
+	Enabled       bool              `json:"enabled"`
+	Reality       RealityConfig     `json:"reality"`
+	Credentials   []ProxyCredential `json:"credentials"`
+	ExitMachineID string            `json:"exit_machine_id,omitempty"`
 }
 
 type RealityConfig struct {
@@ -68,8 +69,36 @@ type ProxyCredential struct {
 	ExpiresAt   string `json:"expires_at,omitempty"`
 }
 
+type TransitCredential struct {
+	EntryMachineID string `json:"entry_machine_id"`
+	UUID           string `json:"uuid"`
+	Email          string `json:"email"`
+}
+
+type DesiredExit struct {
+	MachineID   string              `json:"machine_id"`
+	PublicHost  string              `json:"public_host"`
+	PublicPort  int                 `json:"public_port"`
+	ListenHost  string              `json:"listen_host"`
+	ListenPort  int                 `json:"listen_port"`
+	Reality     RealityConfig       `json:"reality"`
+	Credentials []TransitCredential `json:"credentials"`
+}
+
+type TransitOutbound struct {
+	ExitMachineID string `json:"exit_machine_id"`
+	PublicHost    string `json:"public_host"`
+	PublicPort    int    `json:"public_port"`
+	UUID          string `json:"uuid"`
+	ServerName    string `json:"server_name"`
+	PublicKey     string `json:"public_key"`
+	ShortID       string `json:"short_id"`
+}
+
 type DesiredState struct {
 	Nodes                   []DesiredNode     `json:"nodes"`
+	Exit                    *DesiredExit      `json:"exit,omitempty"`
+	TransitOutbounds        []TransitOutbound `json:"transit_outbounds,omitempty"`
 	PeriodPolicies          []period.Policy   `json:"period_policies,omitempty"`
 	TrafficReportingEnabled bool              `json:"traffic_reporting_enabled,omitempty"`
 	QuotaRestrictions       QuotaRestrictions `json:"quota_restrictions,omitempty"`

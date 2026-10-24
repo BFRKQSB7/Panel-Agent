@@ -26,9 +26,14 @@ func (s *Server) handleNodesPage(w http.ResponseWriter, r *http.Request) {
 		writeNodeError(w, err)
 		return
 	}
+	exits, err := s.store.ListExitOptions(r.Context(), machine.MachineID)
+	if err != nil {
+		writeNodeError(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = s.templates.ExecuteTemplate(w, "nodes.html", map[string]any{
-		"CSRF": session.csrf, "Machine": storage.MachineViewFromRecord(machine), "Nodes": nodes,
+		"CSRF": session.csrf, "Machine": storage.MachineViewFromRecord(machine), "Nodes": nodes, "Exits": exits,
 		"NewNode": storage.NodeInput{Enabled: true, ListenHost: "0.0.0.0", ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443"},
 	})
 }
@@ -54,6 +59,7 @@ func (s *Server) handleNodeForm(w http.ResponseWriter, r *http.Request) {
 		Name: form.Get("name"), PublicHost: form.Get("public_host"), PublicPort: publicPort,
 		ListenHost: form.Get("listen_host"), ListenPort: listenPort, Enabled: form.Get("enabled") == "true",
 		ServerName: form.Get("server_name"), Target: form.Get("target"), Development: form.Get("development") == "true", QuotaBytes: quota,
+		ExitMachineID: form.Get("exit_machine_id"),
 	}, time.Now())
 	if err != nil {
 		writeNodeError(w, err)
@@ -131,6 +137,10 @@ func writeNodeError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, storage.ErrInvalidQuota):
 		http.Error(w, "节点额度无效", http.StatusBadRequest)
+	case errors.Is(err, storage.ErrInvalidExit):
+		http.Error(w, "出口选择无效", http.StatusBadRequest)
+	case errors.Is(err, storage.ErrExitNotFound):
+		http.Error(w, "出口不存在或尚未配置", http.StatusConflict)
 	case errors.Is(err, storage.ErrNodePortConflict):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, storage.ErrMachineAuthentication):

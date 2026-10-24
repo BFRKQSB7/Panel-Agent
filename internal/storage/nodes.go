@@ -27,16 +27,17 @@ var (
 )
 
 type NodeInput struct {
-	Name        string          `json:"name"`
-	PublicHost  string          `json:"public_host"`
-	PublicPort  int             `json:"public_port"`
-	ListenHost  string          `json:"listen_host"`
-	ListenPort  int             `json:"listen_port"`
-	Enabled     bool            `json:"enabled"`
-	ServerName  string          `json:"server_name"`
-	Target      string          `json:"target"`
-	Development bool            `json:"development"`
-	QuotaBytes  *quantity.Bytes `json:"quota_bytes"`
+	Name          string          `json:"name"`
+	PublicHost    string          `json:"public_host"`
+	PublicPort    int             `json:"public_port"`
+	ListenHost    string          `json:"listen_host"`
+	ListenPort    int             `json:"listen_port"`
+	Enabled       bool            `json:"enabled"`
+	ServerName    string          `json:"server_name"`
+	Target        string          `json:"target"`
+	Development   bool            `json:"development"`
+	QuotaBytes    *quantity.Bytes `json:"quota_bytes"`
+	ExitMachineID string          `json:"exit_machine_id,omitempty"`
 }
 
 type NodeRecord struct {
@@ -85,16 +86,20 @@ func normalizeNode(input NodeInput) (NodeInput, error) {
 }
 
 const nodeSelect = `SELECT node_id, machine_id, name, public_host, public_port, listen_host, listen_port,
- enabled, server_name, reality_target, private_key, public_key, short_id, development, quota_bytes FROM nodes`
+ enabled, server_name, reality_target, private_key, public_key, short_id, development, quota_bytes, exit_machine_id FROM nodes`
 
 func scanNode(scanner rowScanner) (NodeRecord, error) {
 	var node NodeRecord
 	var quota sql.NullInt64
+	var exitMachine sql.NullString
 	err := scanner.Scan(&node.NodeID, &node.MachineID, &node.Name, &node.PublicHost, &node.PublicPort, &node.ListenHost,
-		&node.ListenPort, &node.Enabled, &node.ServerName, &node.Target, &node.privateKey, &node.PublicKey, &node.ShortID, &node.Development, &quota)
+		&node.ListenPort, &node.Enabled, &node.ServerName, &node.Target, &node.privateKey, &node.PublicKey, &node.ShortID, &node.Development, &quota, &exitMachine)
 	if err == nil && quota.Valid {
 		value := quantity.Bytes(quota.Int64)
 		node.QuotaBytes = &value
+	}
+	if err == nil {
+		node.ExitMachineID = exitMachine.String
 	}
 	return node, err
 }
@@ -234,16 +239,28 @@ func (s *Store) SaveNode(ctx context.Context, machineID, nodeID string, input No
 			return NodeRecord{}, err
 		}
 	}
+	if input.ExitMachineID != "" {
+		if !security.IsUUIDv4(input.ExitMachineID) || input.ExitMachineID == machineID {
+			return NodeRecord{}, ErrInvalidExit
+		}
+		var exitCount int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM exits WHERE machine_id = ?", input.ExitMachineID).Scan(&exitCount); err != nil {
+			return NodeRecord{}, err
+		}
+		if exitCount != 1 {
+			return NodeRecord{}, ErrExitNotFound
+		}
+	}
 	nowText := now.UTC().Format(time.RFC3339Nano)
 	if creating {
 		_, err = tx.ExecContext(ctx, `INSERT INTO nodes(node_id, machine_id, name, public_host, public_port, listen_host, listen_port,
-	 enabled, server_name, reality_target, private_key, public_key, short_id, development, quota_bytes, created_at, updated_at)
-	 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, machineID, input.Name, input.PublicHost, input.PublicPort,
-			input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, node.privateKey, node.PublicKey, node.ShortID, input.Development, input.QuotaBytes, nowText, nowText)
+		enabled, server_name, reality_target, private_key, public_key, short_id, development, quota_bytes, exit_machine_id, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, machineID, input.Name, input.PublicHost, input.PublicPort,
+			input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, node.privateKey, node.PublicKey, node.ShortID, input.Development, input.QuotaBytes, nullableString(input.ExitMachineID), nowText, nowText)
 	} else {
 		_, err = tx.ExecContext(ctx, `UPDATE nodes SET name = ?, public_host = ?, public_port = ?, listen_host = ?, listen_port = ?,
-	 enabled = ?, server_name = ?, reality_target = ?, development = ?, quota_bytes = ?, updated_at = ? WHERE machine_id = ? AND node_id = ? AND deleted_at IS NULL`,
-			input.Name, input.PublicHost, input.PublicPort, input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, input.Development, input.QuotaBytes, nowText, machineID, nodeID)
+		enabled = ?, server_name = ?, reality_target = ?, development = ?, quota_bytes = ?, exit_machine_id = ?, updated_at = ? WHERE machine_id = ? AND node_id = ? AND deleted_at IS NULL`,
+			input.Name, input.PublicHost, input.PublicPort, input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, input.Development, input.QuotaBytes, nullableString(input.ExitMachineID), nowText, machineID, nodeID)
 	}
 	if err != nil {
 		return NodeRecord{}, fmt.Errorf("persist Node: %w", err)
@@ -283,6 +300,26 @@ func (s *Store) DeleteNode(ctx context.Context, machineID, nodeID string, now ti
 }
 
 func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machineID string) error {
+	return s.refreshMachineDesiredTxMode(ctx, tx, machineID, true)
+}
+
+func (s *Store) refreshMachineDesiredTxMode(ctx context.Context, tx *sql.Tx, machineID string, syncTransit bool) error {
+	changedExitMachines := []string{}
+	if syncTransit {
+		var err error
+		changedExitMachines, err = s.syncTransitCredentialsTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+	}
+	for _, exitMachineID := range changedExitMachines {
+		if exitMachineID == machineID {
+			continue
+		}
+		if err := s.refreshMachineDesiredTxMode(ctx, tx, exitMachineID, false); err != nil {
+			return err
+		}
+	}
 	nodes, err := listNodes(ctx, tx, machineID)
 	if err != nil {
 		return err
@@ -297,7 +334,7 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 			ID: node.NodeID, Name: node.Name, PublicHost: node.PublicHost, PublicPort: node.PublicPort,
 			ListenHost: node.ListenHost, ListenPort: node.ListenPort, Enabled: node.Enabled,
 			Reality:     protocol.RealityConfig{ServerName: node.ServerName, Target: node.Target, PrivateKey: string(private), PublicKey: node.PublicKey, ShortID: node.ShortID},
-			Credentials: []protocol.ProxyCredential{},
+			Credentials: []protocol.ProxyCredential{}, ExitMachineID: node.ExitMachineID,
 		}
 		desired.Credentials, err = s.nodeCredentialsTx(ctx, tx, node.NodeID)
 		if err != nil {
@@ -313,6 +350,10 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 		state.Nodes = append(state.Nodes, desired)
 	}
 	state.PeriodPolicies, err = machinePoliciesTx(ctx, tx, machineID, state)
+	if err != nil {
+		return err
+	}
+	state.Exit, state.TransitOutbounds, err = s.desiredTransitTx(ctx, tx, machineID, state)
 	if err != nil {
 		return err
 	}
@@ -344,7 +385,10 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE machines SET desired_revision = desired_revision + 1, desired_digest = ?, desired_snapshot = ?,
  pending_authority_epoch = NULL, pending_authority_nonce = NULL WHERE machine_id = ?`, digest, encrypted, machineID)
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) GetMachineDesiredState(ctx context.Context, machineID string) (PanelAuthority, error) {

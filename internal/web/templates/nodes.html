@@ -38,10 +38,12 @@
       <form class="fields" method="post" action="/admin/machines/{{.Machine.MachineID}}/nodes">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         {{template "node-fields" .NewNode}}
+        <label>出口 <select name="exit_machine_id"><option value="">本机直出</option>{{range .Exits}}<option value="{{.MachineID}}">{{.DisplayName}} · {{.PublicHost}}:{{.PublicPort}}{{if .Ready}}（已就绪）{{else}}（未就绪，入口将保持阻断）{{end}}</option>{{end}}</select></label>
         <button type="submit">创建节点</button>
       </form>
     </section>
     {{range .Nodes}}
+    {{$node := .}}
     <article>
       <h2>{{.Name}}</h2>
       <p>节点 ID：<code>{{.NodeID}}</code>；公钥：<code>{{.PublicKey}}</code>；Short ID：<code>{{.ShortID}}</code></p>
@@ -49,6 +51,7 @@
       <form class="fields" method="post" action="/admin/machines/{{$.Machine.MachineID}}/nodes/{{.NodeID}}">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         {{template "node-fields" .NodeInput}}
+        <label>出口 <select name="exit_machine_id"><option value="">本机直出</option>{{range $.Exits}}<option value="{{.MachineID}}" {{if eq $node.ExitMachineID .MachineID}}selected{{end}}>{{.DisplayName}} · {{.PublicHost}}:{{.PublicPort}}{{if .Ready}}（已就绪）{{else}}（未就绪，入口将保持阻断）{{end}}</option>{{end}}</select></label>
         <button type="submit">保存节点</button>
       </form>
       <form method="post" action="/admin/machines/{{$.Machine.MachineID}}/nodes/{{.NodeID}}/delete">

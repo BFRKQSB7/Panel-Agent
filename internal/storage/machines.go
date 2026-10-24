@@ -374,7 +374,12 @@ func scanMachine(scanner rowScanner, machine *MachineRecord) error {
 }
 
 func (s *Store) RevokeMachine(ctx context.Context, machineID string, now time.Time) error {
-	result, err := s.db.ExecContext(ctx, "UPDATE machines SET revoked_at = ?, updated_at = ? WHERE machine_id = ? AND revoked_at IS NULL", now.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano), machineID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin machine revocation: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "UPDATE machines SET revoked_at = ?, updated_at = ? WHERE machine_id = ? AND revoked_at IS NULL", now.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano), machineID)
 	if err != nil {
 		return fmt.Errorf("revoke machine: %w", err)
 	}
@@ -384,7 +389,10 @@ func (s *Store) RevokeMachine(ctx context.Context, machineID string, now time.Ti
 		}
 		return ErrMachineNotFound
 	}
-	return nil
+	if err := s.refreshDependentMachineDesiredTx(ctx, tx, machineID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UpdateMachineDetails(ctx context.Context, machineID, displayName, notes string, now time.Time) error {
@@ -605,6 +613,9 @@ func (s *Store) RecordMachineStatus(ctx context.Context, machineID string, reque
 		machine.AppliedRestrictionDigest, nullableString(machine.RestrictionAppliedAt), machineID)
 	if err != nil {
 		return "", fmt.Errorf("persist machine status: %w", err)
+	}
+	if err := s.refreshDependentMachineDesiredTx(ctx, tx, machineID); err != nil {
+		return "", fmt.Errorf("refresh dependent machine snapshots: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("commit machine status: %w", err)

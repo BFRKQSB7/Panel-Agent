@@ -339,7 +339,7 @@ Panel 保存当前计费状态和降采样历史，不保存无限原始 traffic
 
 入口 Node 出口选项仅为本机直出或指定 Exit。禁止把自身作为自身 Exit；出口不再次出站到另一个 Exit，因此不存在任意多跳路径。NAT 上的 Exit 仍需可达的公网 Host/Port 与实际映射，Agent 能连 Panel 不代表该机天然能当公网出口。
 
-内部 Transit 协议与端口安排在 D11 固化为一套受支持实现，默认由系统维护，只暴露必要映射信息。不能依赖所有实验协议天然兼容链式；必须检查其 capability。
+内部 Transit 协议与端口安排已在 D11 固化为独立端口上的 VLESS + REALITY + RAW，一套由系统维护的受支持实现，只暴露入口所需的 Exit 公网映射与 Transit 凭证。不能依赖所有实验协议天然兼容链式；必须检查其 capability。
 
 用户流量只在入口扣一次。入口记 User Global、User×Entry Node 以及 Entry Machine；出口仅记 Exit Machine 的 Transit 用量，不再扣用户全局或某个出口 Node 配额。同一 Core 中入口与出站统计要避免再算两遍。
 

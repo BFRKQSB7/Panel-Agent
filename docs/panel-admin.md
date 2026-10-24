@@ -54,6 +54,12 @@ $joinToken | .\control-agent.exe pair --panel-url $panelUrl --data-dir C:\panel-
 
 进入机器管理中的“Reality 节点”，填写公网主机、公网端口、监听 IP、监听端口、Reality SNI 和目标。公网值仅是管理员录入，不代表已验证 NAT 映射；监听端口 10085 保留给回环 Stats API。节点自动生成独立 X25519 密钥和 Short ID，私钥与机器快照在 Panel 数据库中加密；管理员页面只展示公钥。普通节点默认没有开发凭证，正式用户授权由用户管理功能提供；隔离试验可显式勾选开发凭证，同一开发 UUID 在不同 Node 使用不同统计 email。
 
+### 一跳 Exit
+
+在机器管理中可为每台机器配置一个隐藏 Exit。当前固定的 Transit 实现是独立端口上的 VLESS + REALITY + RAW：Panel 为每个入口机器与 Exit 机器对生成独立 Transit UUID，入口只拿目标 Exit 的公网映射、REALITY 公钥和该 UUID，Exit 只拿对应入口机器的 Transit 凭证；这些字段不会进入用户页面或 URI/Mihomo 订阅。Exit 的监听端口必须与本机 Node 不冲突，公网主机和端口需要管理员按实际 NAT 映射填写，控制通道在线不代表该公网入口已被验证。
+
+节点编辑页的“出口”选择只能指向另一台机器的 Exit。Exit 快照先应用并报告成功后，入口 Node 才会启用一跳路由；Exit 未应用、被吊销、应用失败、轮换中或机器硬停时，入口保持禁用，不回退到本机 Direct。Exit 删除在仍有 Node 引用时拒绝；保存配置或轮换 Transit 后，两端重新应用完成前同样保持 Fail Closed。入口用户流量只生成 `user_entry` 账本流，Transit 入站只生成 `machine_only_transit` 账本流，后者只归属 Exit 机器，不重复计入用户或出口 Node。
+
 Linux Agent 使用已验证的 Xray **26.10.21** 可执行文件。以下命令中的路径由管理员提供；此阶段不会下载或安装 Core：
 
 ```sh

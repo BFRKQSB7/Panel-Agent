@@ -136,3 +136,89 @@ func TestRenderAppliesGlobalNodeAndMachineQuotaRestrictions(t *testing.T) {
 		t.Fatal("machine hard stop left a proxy listener or credential")
 	}
 }
+
+func TestRenderOneHopExitUsesTransitRouteWithoutDirectFallback(t *testing.T) {
+	nodeKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryMachine, _ := security.NewUUID()
+	exitMachine, _ := security.NewUUID()
+	userID, _ := security.NewUUID()
+	nodeID, _ := security.NewUUID()
+	userUUID, _ := security.NewUUID()
+	transitUUID, _ := security.NewUUID()
+	node := protocol.DesiredNode{ID: nodeID, Name: "one-hop", PublicHost: "entry.example.test", PublicPort: 45001, ListenHost: "127.0.0.1", ListenPort: 18443, Enabled: true, ExitMachineID: exitMachine,
+		Reality:     protocol.RealityConfig{ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443", PrivateKey: base64.RawURLEncoding.EncodeToString(nodeKey.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(nodeKey.PublicKey().Bytes()), ShortID: "0123456789abcdef"},
+		Credentials: []protocol.ProxyCredential{{UserID: userID, UUID: userUUID, Email: "user-entry"}}}
+	transit := protocol.TransitOutbound{ExitMachineID: exitMachine, PublicHost: "exit.example.test", PublicPort: 45100, UUID: transitUUID, ServerName: "www.cloudflare.com", PublicKey: base64.RawURLEncoding.EncodeToString(exitKey.PublicKey().Bytes()), ShortID: "fedcba9876543210"}
+	entryState := protocol.DesiredState{Nodes: []protocol.DesiredNode{node}, TransitOutbounds: []protocol.TransitOutbound{transit}}
+	rendered, err := RenderConfig(entryState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Inbounds []struct {
+			Tag      string `json:"tag"`
+			Settings struct {
+				Clients []struct {
+					ID string `json:"id"`
+				} `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+		Outbounds []struct{ Protocol, Tag string } `json:"outbounds"`
+		Routing   struct {
+			Rules []struct {
+				InboundTag  []string `json:"inboundTag"`
+				OutboundTag string   `json:"outboundTag"`
+			} `json:"rules"`
+		} `json:"routing"`
+	}
+	if err := json.Unmarshal(rendered.Bytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Inbounds) != 1 || len(config.Outbounds) != 2 || config.Outbounds[1].Protocol != "vless" || config.Outbounds[1].Tag != "exit-"+exitMachine {
+		t.Fatalf("one-hop config shape = %+v", config)
+	}
+	if len(config.Routing.Rules) != 1 || len(config.Routing.Rules[0].InboundTag) != 1 || config.Routing.Rules[0].InboundTag[0] != "node-"+nodeID || config.Routing.Rules[0].OutboundTag != "exit-"+exitMachine {
+		t.Fatalf("one-hop route = %+v", config.Routing.Rules)
+	}
+	if len(rendered.Mappings) != 1 || rendered.Mappings[0].Kind != "user_entry" {
+		t.Fatalf("one-hop stat mappings = %+v", rendered.Mappings)
+	}
+	exitState := protocol.DesiredState{Nodes: []protocol.DesiredNode{}, Exit: &protocol.DesiredExit{MachineID: exitMachine, PublicHost: "exit.example.test", PublicPort: 45100, ListenHost: "127.0.0.1", ListenPort: 19443,
+		Reality:     protocol.RealityConfig{ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443", PrivateKey: base64.RawURLEncoding.EncodeToString(exitKey.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(exitKey.PublicKey().Bytes()), ShortID: "fedcba9876543210"},
+		Credentials: []protocol.TransitCredential{{EntryMachineID: entryMachine, UUID: transitUUID, Email: "transit-entry"}}}}
+	exitRendered, err := RenderConfig(exitState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config = struct {
+		Inbounds []struct {
+			Tag      string `json:"tag"`
+			Settings struct {
+				Clients []struct {
+					ID string `json:"id"`
+				} `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+		Outbounds []struct{ Protocol, Tag string } `json:"outbounds"`
+		Routing   struct {
+			Rules []struct {
+				InboundTag  []string `json:"inboundTag"`
+				OutboundTag string   `json:"outboundTag"`
+			} `json:"rules"`
+		} `json:"routing"`
+	}{}
+	if err := json.Unmarshal(exitRendered.Bytes, &config); err != nil || len(config.Inbounds) != 1 || config.Inbounds[0].Tag != "exit-"+exitMachine || len(config.Inbounds[0].Settings.Clients) != 1 || config.Inbounds[0].Settings.Clients[0].ID != transitUUID || len(exitRendered.Mappings) != 1 || exitRendered.Mappings[0].Kind != "machine_only_transit" {
+		t.Fatalf("Exit config or transit mapping invalid: %s %+v", exitRendered.Bytes, exitRendered.Mappings)
+	}
+	entryState.TransitOutbounds = nil
+	if _, err := RenderConfig(entryState); err == nil {
+		t.Fatal("enabled one-hop Node silently fell back without a Transit outbound")
+	}
+}

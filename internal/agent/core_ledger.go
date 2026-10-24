@@ -31,6 +31,10 @@ func (m *CoreManager) proveSampleProcess(record *coreConfigRecord) error {
 func ledgerReadings(counters []boundaryCounter) []ledger.Reading {
 	readings := []ledger.Reading{}
 	for _, c := range counters {
+		if c.Kind == "machine_only_transit" {
+			readings = append(readings, ledger.Reading{Label: c.Email, Stream: protocol.TrafficStream{Kind: "machine_only_transit"}, Totals: protocol.Totals{Uplink: quantity.Bytes(c.Uplink), Downlink: quantity.Bytes(c.Downlink)}})
+			continue
+		}
 		// Explicit development credentials are never attributed to a formal user.
 		if c.UserID == "development" {
 			continue
@@ -183,10 +187,13 @@ func (m *CoreManager) Sample(ctx context.Context) error {
 	defer stats.Close()
 	counters := []boundaryCounter{}
 	for _, mapping := range record.Mappings {
-		if mapping.UserID == "development" {
+		if mapping.Kind != "" && mapping.Kind != "user_entry" && mapping.Kind != "machine_only_transit" {
+			return errors.New("unknown Core usage mapping kind")
+		}
+		if mapping.Kind != "machine_only_transit" && mapping.UserID == "development" {
 			continue
 		}
-		if !security.IsUUIDv4(mapping.UserID) {
+		if mapping.Kind != "machine_only_transit" && !security.IsUUIDv4(mapping.UserID) {
 			return errors.New("unknown formal usage mapping")
 		}
 		counter := boundaryCounter{StatMapping: mapping}

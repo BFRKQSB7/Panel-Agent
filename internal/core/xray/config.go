@@ -11,6 +11,7 @@ import (
 )
 
 type StatMapping struct {
+	Kind   string `json:"kind,omitempty"`
 	UserID string `json:"user_id"`
 	NodeID string `json:"node_id"`
 	Email  string `json:"email"`
@@ -53,6 +54,7 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 	}
 	inbounds := []any{}
 	developmentTags := []string{}
+	routeRules := []any{}
 	result := RenderedConfig{Mappings: []StatMapping{}, Listeners: []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(protocol.CoreStatsPort))}}
 	result.Bindings = append([]string{}, result.Listeners...)
 	for _, node := range nodes {
@@ -79,7 +81,7 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 			}
 			onlyDevelopment = onlyDevelopment && credential.Development
 			clients = append(clients, map[string]any{"id": credential.UUID, "email": credential.Email, "level": 0})
-			result.Mappings = append(result.Mappings, StatMapping{UserID: credential.UserID, NodeID: node.ID, Email: credential.Email})
+			result.Mappings = append(result.Mappings, StatMapping{Kind: "user_entry", UserID: credential.UserID, NodeID: node.ID, Email: credential.Email})
 		}
 		if developmentLoopback && onlyDevelopment {
 			developmentTags = append(developmentTags, "node-"+node.ID)
@@ -102,21 +104,64 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 		}
 		result.Listeners = append(result.Listeners, net.JoinHostPort(listenHost, strconv.Itoa(node.ListenPort)))
 		result.Bindings = append(result.Bindings, net.JoinHostPort(node.ListenHost, strconv.Itoa(node.ListenPort)))
+		if node.ExitMachineID != "" {
+			routeRules = append(routeRules, map[string]any{"type": "field", "inboundTag": []string{"node-" + node.ID}, "outboundTag": "exit-" + node.ExitMachineID})
+		}
+	}
+	if state.Exit != nil && !state.QuotaRestrictions.MachineStop {
+		clients := make([]any, 0, len(state.Exit.Credentials))
+		credentials := append([]protocol.TransitCredential{}, state.Exit.Credentials...)
+		sort.Slice(credentials, func(i, j int) bool { return credentials[i].EntryMachineID < credentials[j].EntryMachineID })
+		for _, credential := range credentials {
+			clients = append(clients, map[string]any{"id": credential.UUID, "email": credential.Email, "level": 0})
+			result.Mappings = append(result.Mappings, StatMapping{Kind: "machine_only_transit", Email: credential.Email})
+		}
+		result.Listeners = append(result.Listeners, net.JoinHostPort(state.Exit.ListenHost, strconv.Itoa(state.Exit.ListenPort)))
+		result.Bindings = append(result.Bindings, net.JoinHostPort(state.Exit.ListenHost, strconv.Itoa(state.Exit.ListenPort)))
+		inbounds = append(inbounds, map[string]any{
+			"tag": "exit-" + state.Exit.MachineID, "listen": state.Exit.ListenHost, "port": state.Exit.ListenPort, "protocol": "vless",
+			"settings": map[string]any{"clients": clients, "decryption": "none"},
+			"streamSettings": map[string]any{"network": "raw", "security": "reality", "realitySettings": map[string]any{
+				"show": false, "target": state.Exit.Reality.Target, "serverNames": []string{state.Exit.Reality.ServerName},
+				"privateKey": state.Exit.Reality.PrivateKey, "shortIds": []string{state.Exit.Reality.ShortID},
+			}},
+		})
+	}
+	outbounds := []any{map[string]any{"protocol": "freedom", "tag": "direct"}}
+	if !state.QuotaRestrictions.MachineStop {
+		for _, outbound := range state.TransitOutbounds {
+			outbounds = append(outbounds, map[string]any{
+				"protocol": "vless", "tag": "exit-" + outbound.ExitMachineID,
+				"settings": map[string]any{"vnext": []any{map[string]any{"address": outbound.PublicHost, "port": outbound.PublicPort, "users": []any{map[string]any{"id": outbound.UUID, "encryption": "none"}}}}},
+				"streamSettings": map[string]any{"network": "raw", "security": "reality", "realitySettings": map[string]any{
+					"fingerprint": "chrome", "serverName": outbound.ServerName, "publicKey": outbound.PublicKey, "shortId": outbound.ShortID,
+				}},
+			})
+		}
 	}
 	config := map[string]any{
 		"log":   map[string]any{"access": "none", "error": "none", "loglevel": "none"},
 		"api":   map[string]any{"tag": "api", "listen": net.JoinHostPort("127.0.0.1", strconv.Itoa(protocol.CoreStatsPort)), "services": []string{"StatsService"}},
 		"stats": map[string]any{}, "policy": map[string]any{"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}}},
-		"inbounds": inbounds, "outbounds": []any{map[string]any{"protocol": "freedom", "tag": "direct"}},
+		"inbounds": inbounds, "outbounds": outbounds,
+	}
+	if len(routeRules) > 0 {
+		config["routing"] = map[string]any{"rules": routeRules}
 	}
 	if len(developmentTags) > 0 {
-		config["outbounds"] = []any{map[string]any{"protocol": "freedom", "tag": "direct"}, map[string]any{
+		configOutbounds := append([]any{}, outbounds...)
+		configOutbounds = append(configOutbounds, map[string]any{
 			"protocol": "freedom", "tag": "development-direct", "settings": map[string]any{"finalRules": []any{
 				map[string]any{"action": "allow", "network": "tcp", "ip": []string{"127.0.0.1/32"}, "port": "18080"},
 				map[string]any{"action": "allow", "network": "udp", "ip": []string{"127.0.0.1/32"}, "port": "18081"},
 			}},
-		}}
-		config["routing"] = map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": developmentTags, "outboundTag": "development-direct"}}}
+		})
+		config["outbounds"] = configOutbounds
+		if routing, ok := config["routing"].(map[string]any); ok {
+			routing["rules"] = append([]any{map[string]any{"type": "field", "inboundTag": developmentTags, "outboundTag": "development-direct"}}, routing["rules"].([]any)...)
+		} else {
+			config["routing"] = map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": developmentTags, "outboundTag": "development-direct"}}}
+		}
 	}
 	var err error
 	result.Bytes, err = json.MarshalIndent(config, "", "  ")

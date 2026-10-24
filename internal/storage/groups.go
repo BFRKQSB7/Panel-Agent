@@ -236,7 +236,9 @@ func (s *Store) ListGroups(ctx context.Context, kind string) ([]GroupRecord, err
 }
 
 func (s *Store) refreshAllMachineDesiredTx(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT machine_id FROM machines ORDER BY machine_id")
+	rows, err := tx.QueryContext(ctx, `SELECT m.machine_id
+		FROM machines m LEFT JOIN exits e ON e.machine_id=m.machine_id
+		ORDER BY CASE WHEN e.machine_id IS NULL THEN 1 ELSE 0 END, m.machine_id`)
 	if err != nil {
 		return err
 	}
