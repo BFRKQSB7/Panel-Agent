@@ -5,11 +5,16 @@ import (
 	"strings"
 	"time"
 
+	"panel-agent.local/panel-agent/internal/quantity"
 	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
 )
 
-type dashboardNode struct{ Name, Address, Status, URI string }
+type dashboardNode struct {
+	Name, Address, Status, URI           string
+	Usage, Limit, Remaining, QuotaStatus string
+	Pending                              bool
+}
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.renderDashboard(w, r, nil)
@@ -22,6 +27,11 @@ func (s *Server) renderDashboard(w http.ResponseWriter, r *http.Request, results
 		return
 	}
 	access, err := s.store.GetUserAccess(r.Context(), id, time.Now())
+	if err != nil {
+		s.capabilityError(w, err)
+		return
+	}
+	quota, err := s.store.GetUserQuotaSummary(r.Context(), id, time.Now())
 	if err != nil {
 		s.capabilityError(w, err)
 		return
@@ -42,6 +52,10 @@ func (s *Server) renderDashboard(w http.ResponseWriter, r *http.Request, results
 		return
 	}
 	rows := []dashboardNode{}
+	quotaByNode := map[string]storage.UserNodeQuotaView{}
+	for _, item := range quota.Nodes {
+		quotaByNode[item.NodeID] = item
+	}
 	public := subscriptionNodes(access)
 	for i, node := range access.Nodes {
 		machine, err := s.store.GetMachine(r.Context(), node.MachineID)
@@ -58,7 +72,19 @@ func (s *Server) renderDashboard(w http.ResponseWriter, r *http.Request, results
 				status = "近期有心跳；Agent 已应用配置（未做外网连通性检查）"
 			}
 		}
-		rows = append(rows, dashboardNode{Name: node.Name, Address: nodeURIAddress(public[i]), Status: status, URI: nodeURI(public[i], access.User.CredentialUUID)})
+		nodeRow := dashboardNode{Name: node.Name, Address: nodeURIAddress(public[i]), Status: status, URI: nodeURI(public[i], access.User.CredentialUUID), Limit: "不限", Remaining: "—", QuotaStatus: "无限制"}
+		if item, found := quotaByNode[node.NodeID]; found {
+			nodeRow.Usage = item.Usage.UsedBytes.String()
+			if item.EffectiveQuota != nil {
+				nodeRow.Limit = item.EffectiveQuota.String()
+				if item.Usage.RemainingBytes != nil {
+					nodeRow.Remaining = item.Usage.RemainingBytes.String()
+				}
+				nodeRow.QuotaStatus = quotaUsageStatus(item.Usage.Status, item.Usage.PendingReconcile)
+			}
+			nodeRow.Pending = item.Usage.PendingReconcile
+		}
+		rows = append(rows, nodeRow)
 	}
 	reasons := []string{}
 	for _, reason := range access.UnavailableReasons {
@@ -71,8 +97,43 @@ func (s *Server) renderDashboard(w http.ResponseWriter, r *http.Request, results
 			reasons = append(reasons, "用户组已删除")
 		}
 	}
+	for _, reason := range quota.Reasons {
+		switch reason {
+		case "user_quota_exhausted":
+			reasons = append(reasons, "全局用户额度已耗尽")
+		case "node_quota_exhausted":
+			reasons = append(reasons, "节点额度已耗尽")
+		}
+	}
 	tokenPageHeaders(w)
-	_ = s.templates.ExecuteTemplate(w, "dashboard.html", map[string]any{"UserID": id, "Name": access.User.Name, "ExpiresAt": access.User.ExpiresAt, "QuotaBytes": access.User.QuotaBytes, "Nodes": rows, "Reasons": reasons, "State": state, "ActionToken": action, "Results": results, "ResetPath": "/u/" + r.PathValue("token") + "/subscription/reset", "SingBoxNotice": singBoxRealityUnsupported})
+	globalLimit, globalRemaining := "不限", "—"
+	if quota.Global.LimitBytes != nil {
+		globalLimit = quota.Global.LimitBytes.String()
+		if quota.Global.RemainingBytes != nil {
+			globalRemaining = quota.Global.RemainingBytes.String()
+		}
+	}
+	_ = s.templates.ExecuteTemplate(w, "dashboard.html", map[string]any{"UserID": id, "Name": access.User.Name, "ExpiresAt": access.User.ExpiresAt, "QuotaBytes": access.User.QuotaBytes, "Quota": quota, "GlobalUsed": quota.Global.UsedBytes.String(), "GlobalLimit": globalLimit, "GlobalRemaining": globalRemaining, "GlobalStatus": quotaUsageStatus(quota.Global.Status, quota.Global.PendingReconcile), "GlobalUpdated": quota.Global.LastUpdated, "Nodes": rows, "Reasons": reasons, "State": state, "ActionToken": action, "Results": results, "ResetPath": "/u/" + r.PathValue("token") + "/subscription/reset", "SingBoxNotice": singBoxRealityUnsupported})
+}
+
+func quotaUsageStatus(status []string, pending bool) string {
+	if pending {
+		return "待对账（限制保持当前已确认状态）"
+	}
+	if len(status) > 0 && status[0] == "exhausted" {
+		return "已耗尽"
+	}
+	if len(status) > 0 && status[0] == "unknown_policy" {
+		return "周期策略待生成"
+	}
+	return "正常"
+}
+
+func quotaText(value *quantity.Bytes) string {
+	if value == nil {
+		return "不限"
+	}
+	return value.String()
 }
 
 func (s *Server) handleSubscriptionReset(w http.ResponseWriter, r *http.Request) {

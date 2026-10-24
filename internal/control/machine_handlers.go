@@ -22,6 +22,11 @@ const maxProtocolBodyBytes = 16 << 10
 
 var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
+type machineEditor struct {
+	protocol.MachineView
+	Quota storage.MachineQuotaSummary
+}
+
 func (s *Server) handleMachinesPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -37,9 +42,14 @@ func (s *Server) handleMachinesPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "机器列表暂时不可用。", http.StatusInternalServerError)
 		return
 	}
-	views := make([]protocol.MachineView, 0, len(machines))
+	views := make([]machineEditor, 0, len(machines))
 	for _, machine := range machines {
-		views = append(views, storage.MachineViewFromRecord(machine))
+		quota, quotaErr := s.store.GetMachineQuotaSummary(r.Context(), machine.MachineID, time.Now())
+		if quotaErr != nil {
+			http.Error(w, "机器额度暂时不可用。", http.StatusInternalServerError)
+			return
+		}
+		views = append(views, machineEditor{MachineView: storage.MachineViewFromRecord(machine), Quota: quota})
 	}
 	authority, err := s.store.GetPanelAuthority(r.Context())
 	if err != nil {

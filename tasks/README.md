@@ -2,8 +2,8 @@
 
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
-CURRENT MILESTONE: M3 — 周期与流量账本
-RECOMMENDED NEXT TASK: [D10 — 三维配额、限制状态与真实用量页面](D10-quotas-and-usage-ui.md)
+CURRENT MILESTONE: M4 — 一跳、教程与扩展
+RECOMMENDED NEXT TASK: [D11 — 隐藏 Exit、一跳转发与扣账归属](D11-one-hop-exit.md)
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
@@ -18,8 +18,8 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 | [D07 — 独立周期规则与可执行边界样例](D07-period-policy-contract.md) | M3 | DONE | high | D05 | 固定时区三维周期、不可变策略、精确字节及累计/final/关闭凭据契约完成；Windows/冰岛样例完全一致且清理通过，Chromium 大整数/零/不限往返通过，相关 Go 与权限凭证回归通过。 |
 | [D08 — Agent 持久采样、累计账本与重启恢复](D08-agent-durable-ledger.md) | M3 | DONE | max | D07 | 事务采样/水位/冻结累计、按序补发与确认清理、恢复握手和旧快照策略接入完成；Go 针对性、Linux 崩溃/ACK 与冰岛真实流量通过，授权回归整机峰值 100.8MiB、OOM 零且清理通过。 |
 | [D09 — Panel 幂等入账与双端补报贯通](D09-panel-idempotent-ingest.md) | M3 | DONE | max | D08 | Panel traffic recovery/ingest routes, transactional K watermarks, raw reports, closed-prefix receipts, row isolation, SQLite/HTTPS tests; go test ./... and go vet ./... pass. |
-| [D10 — 三维配额、限制状态与真实用量页面](D10-quotas-and-usage-ui.md) | M3 | READY | high | D06, D09 | — |
-| [D11 — 隐藏 Exit、一跳转发与扣账归属](D11-one-hop-exit.md) | M4 | WAITING | high | D10 | — |
+| [D10 — 三维配额、限制状态与真实用量页面](D10-quotas-and-usage-ui.md) | M3 | DONE | high | D06, D09 | 三维配额/预算持久化、限制原因与到期时间快照、离线/待对账围栏、Agent 应用回报、管理 API/表单与真实用量页完成；定向/全量 Go 测试及 vet 通过。 |
+| [D11 — 隐藏 Exit、一跳转发与扣账归属](D11-one-hop-exit.md) | M4 | READY | high | D10 | 依赖已满足，可领取。 |
 | [D12 — 动态 NAT/DNS 教程与有限连通性检查](D12-nat-dns-guidance.md) | M4 | READY | high | D06 | — |
 | [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md) | M4 | READY | high | D06 | — |
 | [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md) | M5 | READY | high | D04 | — |

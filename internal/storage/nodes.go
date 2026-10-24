@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"panel-agent.local/panel-agent/internal/protocol"
+	"panel-agent.local/panel-agent/internal/quantity"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -26,15 +27,16 @@ var (
 )
 
 type NodeInput struct {
-	Name        string `json:"name"`
-	PublicHost  string `json:"public_host"`
-	PublicPort  int    `json:"public_port"`
-	ListenHost  string `json:"listen_host"`
-	ListenPort  int    `json:"listen_port"`
-	Enabled     bool   `json:"enabled"`
-	ServerName  string `json:"server_name"`
-	Target      string `json:"target"`
-	Development bool   `json:"development"`
+	Name        string          `json:"name"`
+	PublicHost  string          `json:"public_host"`
+	PublicPort  int             `json:"public_port"`
+	ListenHost  string          `json:"listen_host"`
+	ListenPort  int             `json:"listen_port"`
+	Enabled     bool            `json:"enabled"`
+	ServerName  string          `json:"server_name"`
+	Target      string          `json:"target"`
+	Development bool            `json:"development"`
+	QuotaBytes  *quantity.Bytes `json:"quota_bytes"`
 }
 
 type NodeRecord struct {
@@ -49,7 +51,7 @@ type NodeRecord struct {
 
 func normalizeNode(input NodeInput) (NodeInput, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if !protocol.ValidText(input.Name, 128) {
+	if !protocol.ValidText(input.Name, 128) || input.QuotaBytes != nil && *input.QuotaBytes < 0 {
 		return input, fmt.Errorf("%w: 名称不能为空或包含控制字符", ErrInvalidNode)
 	}
 	var err error
@@ -83,12 +85,17 @@ func normalizeNode(input NodeInput) (NodeInput, error) {
 }
 
 const nodeSelect = `SELECT node_id, machine_id, name, public_host, public_port, listen_host, listen_port,
- enabled, server_name, reality_target, private_key, public_key, short_id, development FROM nodes`
+ enabled, server_name, reality_target, private_key, public_key, short_id, development, quota_bytes FROM nodes`
 
 func scanNode(scanner rowScanner) (NodeRecord, error) {
 	var node NodeRecord
+	var quota sql.NullInt64
 	err := scanner.Scan(&node.NodeID, &node.MachineID, &node.Name, &node.PublicHost, &node.PublicPort, &node.ListenHost,
-		&node.ListenPort, &node.Enabled, &node.ServerName, &node.Target, &node.privateKey, &node.PublicKey, &node.ShortID, &node.Development)
+		&node.ListenPort, &node.Enabled, &node.ServerName, &node.Target, &node.privateKey, &node.PublicKey, &node.ShortID, &node.Development, &quota)
+	if err == nil && quota.Valid {
+		value := quantity.Bytes(quota.Int64)
+		node.QuotaBytes = &value
+	}
 	return node, err
 }
 
@@ -230,13 +237,13 @@ func (s *Store) SaveNode(ctx context.Context, machineID, nodeID string, input No
 	nowText := now.UTC().Format(time.RFC3339Nano)
 	if creating {
 		_, err = tx.ExecContext(ctx, `INSERT INTO nodes(node_id, machine_id, name, public_host, public_port, listen_host, listen_port,
- enabled, server_name, reality_target, private_key, public_key, short_id, development, created_at, updated_at)
- VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, machineID, input.Name, input.PublicHost, input.PublicPort,
-			input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, node.privateKey, node.PublicKey, node.ShortID, input.Development, nowText, nowText)
+	 enabled, server_name, reality_target, private_key, public_key, short_id, development, quota_bytes, created_at, updated_at)
+	 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, machineID, input.Name, input.PublicHost, input.PublicPort,
+			input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, node.privateKey, node.PublicKey, node.ShortID, input.Development, input.QuotaBytes, nowText, nowText)
 	} else {
 		_, err = tx.ExecContext(ctx, `UPDATE nodes SET name = ?, public_host = ?, public_port = ?, listen_host = ?, listen_port = ?,
- enabled = ?, server_name = ?, reality_target = ?, development = ?, updated_at = ? WHERE machine_id = ? AND node_id = ? AND deleted_at IS NULL`,
-			input.Name, input.PublicHost, input.PublicPort, input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, input.Development, nowText, machineID, nodeID)
+	 enabled = ?, server_name = ?, reality_target = ?, development = ?, quota_bytes = ?, updated_at = ? WHERE machine_id = ? AND node_id = ? AND deleted_at IS NULL`,
+			input.Name, input.PublicHost, input.PublicPort, input.ListenHost, input.ListenPort, input.Enabled, input.ServerName, input.Target, input.Development, input.QuotaBytes, nowText, machineID, nodeID)
 	}
 	if err != nil {
 		return NodeRecord{}, fmt.Errorf("persist Node: %w", err)
@@ -306,6 +313,10 @@ func (s *Store) refreshMachineDesiredTx(ctx context.Context, tx *sql.Tx, machine
 		state.Nodes = append(state.Nodes, desired)
 	}
 	state.PeriodPolicies, err = machinePoliciesTx(ctx, tx, machineID, state)
+	if err != nil {
+		return err
+	}
+	state.QuotaRestrictions, err = s.quotaRestrictionsTx(ctx, tx, machineID, state, time.Now().UTC())
 	if err != nil {
 		return err
 	}

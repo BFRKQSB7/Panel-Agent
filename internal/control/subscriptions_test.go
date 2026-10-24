@@ -152,7 +152,7 @@ func TestPrivateLinksAuthorizationRetryAndSubscriptionProjection(t *testing.T) {
 	call(public, "GET", "/u/"+sub, "", "", 404)
 	call(public, "GET", "/s/"+dash+"/uri", "", "", 404)
 	dashboard, _ := call(public, "GET", "/u/"+dash, "", "", 200)
-	if !bytes.Contains(dashboard, []byte("尚未启用")) || !bytes.Contains(dashboard, []byte("心跳失联")) || bytes.Contains(dashboard, []byte(sub)) {
+	if !bytes.Contains(dashboard, []byte("本周期全局实际用量")) || !bytes.Contains(dashboard, []byte("心跳失联")) || bytes.Contains(dashboard, []byte(sub)) {
 		t.Fatal("dashboard leaks subscription token or invents usage/online status")
 	}
 	match := regexp.MustCompile(`name="action_token" value="([^"]+)"`).FindSubmatch(dashboard)

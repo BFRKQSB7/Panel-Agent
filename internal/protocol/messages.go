@@ -69,9 +69,10 @@ type ProxyCredential struct {
 }
 
 type DesiredState struct {
-	Nodes                   []DesiredNode   `json:"nodes"`
-	PeriodPolicies          []period.Policy `json:"period_policies,omitempty"`
-	TrafficReportingEnabled bool            `json:"traffic_reporting_enabled,omitempty"`
+	Nodes                   []DesiredNode     `json:"nodes"`
+	PeriodPolicies          []period.Policy   `json:"period_policies,omitempty"`
+	TrafficReportingEnabled bool              `json:"traffic_reporting_enabled,omitempty"`
+	QuotaRestrictions       QuotaRestrictions `json:"quota_restrictions,omitempty"`
 }
 
 type RegisterRequest struct {
@@ -123,25 +124,27 @@ type DesiredStateResponse struct {
 }
 
 type StatusRequest struct {
-	RequestID             string `json:"request_id"`
-	AuthorityEpoch        string `json:"authority_epoch"`
-	Revision              uint64 `json:"revision"`
-	Digest                string `json:"digest"`
-	Hostname              string `json:"hostname"`
-	DisplayName           string `json:"display_name,omitempty"`
-	OS                    string `json:"os"`
-	Architecture          string `json:"architecture"`
-	CPUCount              int    `json:"cpu_count"`
-	MemoryBytes           uint64 `json:"memory_bytes"`
-	AgentVersion          string `json:"agent_version"`
-	Received              bool   `json:"received"`
-	Applied               bool   `json:"applied"`
-	AppliedRevision       uint64 `json:"applied_revision,omitempty"`
-	AppliedDigest         string `json:"applied_digest,omitempty"`
-	ApplyError            string `json:"apply_error,omitempty"`
-	AppliedAuthorityEpoch string `json:"applied_authority_epoch,omitempty"`
-	CoreGeneration        uint64 `json:"core_generation,omitempty"`
-	CoreInstanceID        string `json:"core_instance_id,omitempty"`
+	RequestID                string `json:"request_id"`
+	AuthorityEpoch           string `json:"authority_epoch"`
+	Revision                 uint64 `json:"revision"`
+	Digest                   string `json:"digest"`
+	Hostname                 string `json:"hostname"`
+	DisplayName              string `json:"display_name,omitempty"`
+	OS                       string `json:"os"`
+	Architecture             string `json:"architecture"`
+	CPUCount                 int    `json:"cpu_count"`
+	MemoryBytes              uint64 `json:"memory_bytes"`
+	AgentVersion             string `json:"agent_version"`
+	Received                 bool   `json:"received"`
+	Applied                  bool   `json:"applied"`
+	AppliedRevision          uint64 `json:"applied_revision,omitempty"`
+	AppliedDigest            string `json:"applied_digest,omitempty"`
+	ApplyError               string `json:"apply_error,omitempty"`
+	AppliedAuthorityEpoch    string `json:"applied_authority_epoch,omitempty"`
+	CoreGeneration           uint64 `json:"core_generation,omitempty"`
+	CoreInstanceID           string `json:"core_instance_id,omitempty"`
+	AppliedRestrictionDigest string `json:"applied_restriction_digest,omitempty"`
+	RestrictionAppliedAt     string `json:"restriction_applied_at,omitempty"`
 }
 
 type StatusResponse struct {
@@ -155,27 +158,29 @@ type JoinTokenResponse struct {
 }
 
 type MachineView struct {
-	MachineID             string `json:"machine_id"`
-	Hostname              string `json:"hostname"`
-	DisplayName           string `json:"display_name"`
-	Notes                 string `json:"notes"`
-	OS                    string `json:"os"`
-	Architecture          string `json:"architecture"`
-	CPUCount              int    `json:"cpu_count"`
-	MemoryBytes           uint64 `json:"memory_bytes"`
-	AgentVersion          string `json:"agent_version"`
-	AuthorityEpoch        string `json:"authority_epoch"`
-	DesiredRevision       uint64 `json:"desired_revision"`
-	ReceivedRevision      uint64 `json:"received_revision"`
-	ReceivedDigest        string `json:"received_digest"`
-	AppliedRevision       uint64 `json:"applied_revision"`
-	AppliedDigest         string `json:"applied_digest"`
-	ApplyError            string `json:"apply_error"`
-	AppliedAuthorityEpoch string `json:"applied_authority_epoch"`
-	CoreGeneration        uint64 `json:"core_generation"`
-	CoreInstanceID        string `json:"core_instance_id"`
-	LastHeartbeat         string `json:"last_heartbeat,omitempty"`
-	Revoked               bool   `json:"revoked"`
+	MachineID                string `json:"machine_id"`
+	Hostname                 string `json:"hostname"`
+	DisplayName              string `json:"display_name"`
+	Notes                    string `json:"notes"`
+	OS                       string `json:"os"`
+	Architecture             string `json:"architecture"`
+	CPUCount                 int    `json:"cpu_count"`
+	MemoryBytes              uint64 `json:"memory_bytes"`
+	AgentVersion             string `json:"agent_version"`
+	AuthorityEpoch           string `json:"authority_epoch"`
+	DesiredRevision          uint64 `json:"desired_revision"`
+	ReceivedRevision         uint64 `json:"received_revision"`
+	ReceivedDigest           string `json:"received_digest"`
+	AppliedRevision          uint64 `json:"applied_revision"`
+	AppliedDigest            string `json:"applied_digest"`
+	ApplyError               string `json:"apply_error"`
+	AppliedAuthorityEpoch    string `json:"applied_authority_epoch"`
+	CoreGeneration           uint64 `json:"core_generation"`
+	CoreInstanceID           string `json:"core_instance_id"`
+	AppliedRestrictionDigest string `json:"applied_restriction_digest,omitempty"`
+	RestrictionAppliedAt     string `json:"restriction_applied_at,omitempty"`
+	LastHeartbeat            string `json:"last_heartbeat,omitempty"`
+	Revoked                  bool   `json:"revoked"`
 }
 
 func EmptyDesiredState() DesiredState {

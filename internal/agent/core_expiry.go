@@ -84,7 +84,11 @@ func (m *CoreManager) renderWithPermissionFloor(desired protocol.DesiredState, c
 			}
 		}
 	}
-	filtered := protocol.DesiredState{Nodes: append([]protocol.DesiredNode{}, desired.Nodes...)}
+	filtered := protocol.DesiredState{Nodes: append([]protocol.DesiredNode{}, desired.Nodes...), QuotaRestrictions: desired.QuotaRestrictions}
+	filtered.QuotaRestrictions, err = protocol.MergeQuotaRestrictions(floor.QuotaRestrictions, desired.QuotaRestrictions)
+	if err != nil {
+		return xray.RenderedConfig{}, err
+	}
 	for i := range filtered.Nodes {
 		node := &filtered.Nodes[i]
 		grants, exists := allowed[node.ID]
@@ -119,14 +123,23 @@ func (m *CoreManager) recordAtPresent(record *coreConfigRecord) (*coreConfigReco
 	}
 	hash := sha256.Sum256(rendered.Bytes)
 	next := *record
+	effectiveRestrictions := desired.QuotaRestrictions
 	if m.state.PermissionDigest != "" {
 		floor, err := m.readDesired(&coreConfigRecord{Digest: m.state.PermissionDigest})
 		if err != nil {
 			return nil, err
 		}
 		next.PeriodPolicies = floor.PeriodPolicies
+		effectiveRestrictions, err = protocol.MergeQuotaRestrictions(floor.QuotaRestrictions, desired.QuotaRestrictions)
+		if err != nil {
+			return nil, err
+		}
 	}
 	next.ConfigHash, next.Mappings, next.Listeners = hex.EncodeToString(hash[:]), rendered.Mappings, rendered.Listeners
+	next.RestrictionDigest, err = effectiveRestrictions.Digest()
+	if err != nil {
+		return nil, err
+	}
 	if err := storage.WritePrivateAtomic(m.configPath(&next), rendered.Bytes); err != nil {
 		return nil, err
 	}

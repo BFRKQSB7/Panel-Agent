@@ -45,10 +45,15 @@ func (s *Server) handleNodeForm(w http.ResponseWriter, r *http.Request) {
 	}
 	publicPort, _ := strconv.Atoi(form.Get("public_port"))
 	listenPort, _ := strconv.Atoi(form.Get("listen_port"))
+	quota, err := parseQuotaValue(form.Get("quota_bytes"))
+	if err != nil {
+		writeNodeError(w, err)
+		return
+	}
 	_, err = s.store.SaveNode(r.Context(), r.PathValue("machineID"), r.PathValue("nodeID"), storage.NodeInput{
 		Name: form.Get("name"), PublicHost: form.Get("public_host"), PublicPort: publicPort,
 		ListenHost: form.Get("listen_host"), ListenPort: listenPort, Enabled: form.Get("enabled") == "true",
-		ServerName: form.Get("server_name"), Target: form.Get("target"), Development: form.Get("development") == "true",
+		ServerName: form.Get("server_name"), Target: form.Get("target"), Development: form.Get("development") == "true", QuotaBytes: quota,
 	}, time.Now())
 	if err != nil {
 		writeNodeError(w, err)
@@ -124,6 +129,8 @@ func writeNodeError(w http.ResponseWriter, err error) {
 		http.Error(w, "机器或节点不存在", http.StatusNotFound)
 	case errors.Is(err, storage.ErrInvalidNode):
 		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, storage.ErrInvalidQuota):
+		http.Error(w, "节点额度无效", http.StatusBadRequest)
 	case errors.Is(err, storage.ErrNodePortConflict):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, storage.ErrMachineAuthentication):

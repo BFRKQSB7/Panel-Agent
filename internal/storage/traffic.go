@@ -23,11 +23,12 @@ var (
 )
 
 type trafficLedger struct {
-	MachineID      string
-	LedgerEpoch    string
-	InstallationID string
-	Allocated      uint64
-	ClosedThrough  uint64
+	MachineID             string
+	LedgerEpoch           string
+	InstallationID        string
+	Allocated             uint64
+	ClosedThrough         uint64
+	ReconciliationPending bool
 }
 
 type trafficRowReject struct{ code string }
@@ -64,19 +65,19 @@ func (s *Store) panelInstallationTx(ctx context.Context, tx *sql.Tx) (string, er
 
 func readTrafficLedger(ctx context.Context, tx *sql.Tx, machineID string) (trafficLedger, error) {
 	var ledger trafficLedger
-	var allocated, closed int64
-	err := tx.QueryRowContext(ctx, `SELECT machine_id,ledger_epoch,installation_id,allocated_close_seq,closed_through
+	var allocated, closed, pending int64
+	err := tx.QueryRowContext(ctx, `SELECT machine_id,ledger_epoch,installation_id,allocated_close_seq,closed_through,reconciliation_pending
 		FROM traffic_ledgers WHERE machine_id=?`, machineID).Scan(
-		&ledger.MachineID, &ledger.LedgerEpoch, &ledger.InstallationID, &allocated, &closed)
+		&ledger.MachineID, &ledger.LedgerEpoch, &ledger.InstallationID, &allocated, &closed, &pending)
 	if err != nil {
 		return ledger, err
 	}
-	if allocated < 0 || closed < 0 || closed > allocated ||
+	if allocated < 0 || closed < 0 || closed > allocated || (pending != 0 && pending != 1) ||
 		!security.IsUUIDv4(ledger.MachineID) || !security.IsUUIDv4(ledger.LedgerEpoch) ||
 		!security.IsUUIDv4(ledger.InstallationID) {
 		return trafficLedger{}, ErrTrafficInvalid
 	}
-	ledger.Allocated, ledger.ClosedThrough = uint64(allocated), uint64(closed)
+	ledger.Allocated, ledger.ClosedThrough, ledger.ReconciliationPending = uint64(allocated), uint64(closed), pending == 1
 	return ledger, nil
 }
 
@@ -85,9 +86,24 @@ func writeTrafficLedger(ctx context.Context, tx *sql.Tx, ledger trafficLedger, n
 		return ErrTrafficInvalid
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE traffic_ledgers
-		SET allocated_close_seq=?,closed_through=?,updated_at=? WHERE machine_id=?`,
-		int64(ledger.Allocated), int64(ledger.ClosedThrough), trafficTextTime(now), ledger.MachineID)
+		SET allocated_close_seq=?,closed_through=?,reconciliation_pending=?,updated_at=? WHERE machine_id=?`,
+		int64(ledger.Allocated), int64(ledger.ClosedThrough), boolInt(ledger.ReconciliationPending), trafficTextTime(now), ledger.MachineID)
 	return err
+}
+
+func markTrafficReconciliationPending(ctx context.Context, tx *sql.Tx, machineID string, now time.Time) error {
+	_, err := tx.ExecContext(ctx, "UPDATE traffic_ledgers SET reconciliation_pending=1,updated_at=? WHERE machine_id=?", trafficTextTime(now), machineID)
+	return err
+}
+
+func (s *Store) commitTrafficRecoveryGap(ctx context.Context, tx *sql.Tx, response protocol.TrafficRecoveryResponse, machineID string, now time.Time) (protocol.TrafficRecoveryResponse, error) {
+	if err := markTrafficReconciliationPending(ctx, tx, machineID, now); err != nil {
+		return response, fmt.Errorf("mark traffic reconciliation pending: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return response, fmt.Errorf("commit traffic reconciliation pending: %w", err)
+	}
+	return response, ErrTrafficRecoveryGap
 }
 
 func validateTrafficAuthority(ctx context.Context, tx *sql.Tx, machineID, authority string) error {
@@ -162,8 +178,8 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 		}
 		ledger = trafficLedger{MachineID: machineID, LedgerEpoch: request.LedgerEpoch, InstallationID: installation, Allocated: request.Allocated}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO traffic_ledgers
-			(machine_id,ledger_epoch,installation_id,allocated_close_seq,closed_through,updated_at)
-			VALUES(?,?,?,?,?,?)`, machineID, request.LedgerEpoch, installation, int64(request.Allocated), 0, trafficTextTime(now)); err != nil {
+			(machine_id,ledger_epoch,installation_id,allocated_close_seq,closed_through,reconciliation_pending,updated_at)
+			VALUES(?,?,?,?,?,?,?)`, machineID, request.LedgerEpoch, installation, int64(request.Allocated), 0, 0, trafficTextTime(now)); err != nil {
 			return response, fmt.Errorf("create traffic ledger: %w", err)
 		}
 	} else if err != nil {
@@ -179,7 +195,7 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 			return response, ErrTrafficEpoch
 		}
 		if request.Allocated < ledger.Allocated {
-			return response, ErrTrafficRecoveryGap
+			return s.commitTrafficRecoveryGap(ctx, tx, response, machineID, now)
 		}
 		if request.Allocated > ledger.Allocated {
 			ledger.Allocated = request.Allocated
@@ -192,7 +208,7 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 		return response, err
 	}
 	if request.Allocated < ledger.Allocated {
-		return response, ErrTrafficRecoveryGap
+		return s.commitTrafficRecoveryGap(ctx, tx, response, machineID, now)
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT close_seq FROM traffic_segments
 		WHERE machine_id=? AND ledger_epoch=? AND finalized=1 AND close_seq IS NOT NULL`, machineID, ledger.LedgerEpoch)
@@ -207,7 +223,7 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 		}
 		if seq <= 0 || !heldContains(request.Held, uint64(seq)) {
 			rows.Close()
-			return response, ErrTrafficRecoveryGap
+			return s.commitTrafficRecoveryGap(ctx, tx, response, machineID, now)
 		}
 	}
 	if err = rows.Err(); err != nil {
@@ -215,6 +231,13 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 		return response, err
 	}
 	rows.Close()
+	ledger.ReconciliationPending = false
+	if err = writeTrafficLedger(ctx, tx, ledger, now); err != nil {
+		return response, fmt.Errorf("clear traffic reconciliation pending: %w", err)
+	}
+	if err = s.refreshAllMachineDesiredTx(ctx, tx); err != nil {
+		return response, fmt.Errorf("refresh quota restrictions after traffic recovery: %w", err)
+	}
 	if err = tx.Commit(); err != nil {
 		return response, fmt.Errorf("commit traffic recovery: %w", err)
 	}
@@ -544,8 +567,12 @@ func (s *Store) IngestTraffic(ctx context.Context, machineID string, request pro
 	if err = s.advanceTrafficPrefix(ctx, tx, &ledger, now); err != nil {
 		return ack, err
 	}
+	ledger.ReconciliationPending = false
 	if err = writeTrafficLedger(ctx, tx, ledger, now); err != nil {
 		return ack, fmt.Errorf("persist traffic ledger: %w", err)
+	}
+	if err = s.refreshAllMachineDesiredTx(ctx, tx); err != nil {
+		return ack, fmt.Errorf("refresh quota restrictions after traffic ingest: %w", err)
 	}
 	for i := range ack.Outcomes {
 		if ack.Outcomes[i].Status == "final" && ack.Outcomes[i].CloseSeq <= ledger.ClosedThrough {

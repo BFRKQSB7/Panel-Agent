@@ -39,19 +39,38 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 	}
 	nodes := append([]protocol.DesiredNode{}, state.Nodes...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	globalRestrictions := map[string]bool{}
+	nodeRestrictions := map[string]map[string]bool{}
+	for _, item := range state.QuotaRestrictions.Items {
+		if item.NodeID == "" {
+			globalRestrictions[item.UserID] = true
+			continue
+		}
+		if nodeRestrictions[item.NodeID] == nil {
+			nodeRestrictions[item.NodeID] = map[string]bool{}
+		}
+		nodeRestrictions[item.NodeID][item.UserID] = true
+	}
 	inbounds := []any{}
 	developmentTags := []string{}
 	result := RenderedConfig{Mappings: []StatMapping{}, Listeners: []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(protocol.CoreStatsPort))}}
 	result.Bindings = append([]string{}, result.Listeners...)
 	for _, node := range nodes {
-		if !node.Enabled {
+		if !node.Enabled || state.QuotaRestrictions.MachineStop {
 			continue
 		}
 		credentials := append([]protocol.ProxyCredential{}, node.Credentials...)
 		sort.Slice(credentials, func(i, j int) bool { return credentials[i].UserID < credentials[j].UserID })
-		clients := []any{}
-		onlyDevelopment := len(credentials) > 0
+		activeCredentials := make([]protocol.ProxyCredential, 0, len(credentials))
 		for _, credential := range credentials {
+			if globalRestrictions[credential.UserID] || nodeRestrictions[node.ID][credential.UserID] {
+				continue
+			}
+			activeCredentials = append(activeCredentials, credential)
+		}
+		clients := []any{}
+		onlyDevelopment := len(activeCredentials) > 0
+		for _, credential := range activeCredentials {
 			if credential.ExpiresAt != "" {
 				expiry, _ := time.Parse(time.RFC3339, credential.ExpiresAt)
 				if !time.Now().Before(expiry) {

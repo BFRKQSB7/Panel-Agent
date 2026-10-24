@@ -166,10 +166,19 @@ func TestCoreStatusKeepsGenerationSeparateFromAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	instance, _ := security.NewUUID()
+	restrictionDigest, err := authority.Snapshot.QuotaRestrictions.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := protocol.StatusRequest{AuthorityEpoch: authority.Epoch, Revision: authority.Revision, Digest: authority.Digest, Received: true,
-		Applied: true, AppliedAuthorityEpoch: authority.Epoch, AppliedRevision: authority.Revision, AppliedDigest: authority.Digest, CoreGeneration: 2, CoreInstanceID: instance}
+		Applied: true, AppliedAuthorityEpoch: authority.Epoch, AppliedRevision: authority.Revision, AppliedDigest: authority.Digest, CoreGeneration: 2, CoreInstanceID: instance,
+		AppliedRestrictionDigest: restrictionDigest, RestrictionAppliedAt: now.Format(time.RFC3339Nano)}
 	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); err != nil {
 		t.Fatal(err)
+	}
+	stored, err := store.GetMachine(ctx, machine.MachineID)
+	if err != nil || stored.AppliedRestrictionDigest != restrictionDigest || stored.RestrictionAppliedAt != now.Format(time.RFC3339Nano) {
+		t.Fatalf("restriction apply status was not persisted: %+v, %v", stored, err)
 	}
 	request.CoreGeneration = 1
 	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); !errors.Is(err, ErrStaleRevision) {
@@ -197,7 +206,7 @@ func TestCoreStatusKeepsGenerationSeparateFromAuthority(t *testing.T) {
 	if _, err := store.RecordMachineStatus(ctx, machine.MachineID, request, now); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := store.GetMachine(ctx, machine.MachineID)
+	stored, err = store.GetMachine(ctx, machine.MachineID)
 	if err != nil || stored.AuthorityEpoch != newAuthority.Epoch || stored.AppliedAuthorityEpoch != authority.Epoch || stored.CoreGeneration != 3 || stored.ApplyError != protocol.ErrorCoreHealthFailed {
 		t.Fatalf("failed authority candidate overwrote previous applied scope: %v", err)
 	}

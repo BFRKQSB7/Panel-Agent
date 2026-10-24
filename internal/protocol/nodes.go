@@ -54,6 +54,9 @@ func ValidText(text string, maximum int) bool {
 }
 
 func ValidateDesiredState(state DesiredState) error {
+	if err := state.QuotaRestrictions.Validate(); err != nil {
+		return err
+	}
 	if len(state.PeriodPolicies) > 4096 {
 		return errors.New("周期策略数量超限")
 	}

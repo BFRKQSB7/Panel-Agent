@@ -78,3 +78,61 @@ func TestRenderMergesNodesWithDistinctStatsAndNoImplicitCredentials(t *testing.T
 		t.Fatal("duplicate credential within a Node was accepted")
 	}
 }
+
+func TestRenderAppliesGlobalNodeAndMachineQuotaRestrictions(t *testing.T) {
+	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userOne, _ := security.NewUUID()
+	userTwo, _ := security.NewUUID()
+	nodeOne, _ := security.NewUUID()
+	nodeTwo, _ := security.NewUUID()
+	uuidOne, _ := security.NewUUID()
+	uuidTwo, _ := security.NewUUID()
+	newNode := func(id string, port int) protocol.DesiredNode {
+		return protocol.DesiredNode{ID: id, Name: id, PublicHost: "node.example.test", PublicPort: port, ListenHost: "127.0.0.1", ListenPort: port,
+			Enabled: true, Reality: protocol.RealityConfig{ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443", PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), ShortID: "0123456789abcdef"}, Credentials: []protocol.ProxyCredential{}}
+	}
+	first, second := newNode(nodeOne, 18443), newNode(nodeTwo, 18444)
+	first.Credentials = []protocol.ProxyCredential{{UserID: userOne, UUID: uuidOne, Email: "one"}, {UserID: userTwo, UUID: uuidTwo, Email: "two-one"}}
+	second.Credentials = []protocol.ProxyCredential{{UserID: userOne, UUID: uuidOne, Email: "one-two"}, {UserID: userTwo, UUID: uuidTwo, Email: "two-two"}}
+	state := protocol.DesiredState{Nodes: []protocol.DesiredNode{first, second}, QuotaRestrictions: protocol.QuotaRestrictions{Items: []protocol.QuotaRestriction{{UserID: userOne, Reasons: []string{protocol.RestrictionUserQuotaExhausted}}, {UserID: userTwo, NodeID: nodeTwo, Reasons: []string{protocol.RestrictionNodeQuotaExhausted}}}}}
+	rendered, err := RenderConfig(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Inbounds []struct {
+			Tag      string
+			Settings struct {
+				Clients []struct {
+					ID string
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal(rendered.Bytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	clientsByTag := map[string][]string{}
+	for _, inbound := range config.Inbounds {
+		for _, client := range inbound.Settings.Clients {
+			clientsByTag[inbound.Tag] = append(clientsByTag[inbound.Tag], client.ID)
+		}
+	}
+	if len(config.Inbounds) != 2 || len(clientsByTag["node-"+nodeOne]) != 1 || clientsByTag["node-"+nodeOne][0] != uuidTwo || len(clientsByTag["node-"+nodeTwo]) != 0 {
+		t.Fatalf("quota restrictions were not rendered per dimension: %+v", config.Inbounds)
+	}
+	if len(rendered.Mappings) != 1 || rendered.Mappings[0].UserID != userTwo || rendered.Mappings[0].NodeID != nodeOne {
+		t.Fatalf("quota restriction mappings = %+v", rendered.Mappings)
+	}
+	state.QuotaRestrictions = protocol.QuotaRestrictions{MachineStop: true}
+	stopped, err := RenderConfig(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(stopped.Bytes, []byte("node-"+nodeOne)) || len(stopped.Mappings) != 0 {
+		t.Fatal("machine hard stop left a proxy listener or credential")
+	}
+}

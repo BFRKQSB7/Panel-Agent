@@ -256,10 +256,17 @@ func TestTrafficRecoveryRequiresHeldFinalsAndSupportsOutOfOrderClosure(t *testin
 	if _, err := f.Store.RecoverTraffic(context.Background(), f.Machine.MachineID, missing, time.Now()); !errors.Is(err, ErrTrafficRecoveryGap) {
 		t.Fatalf("missing held final result = %v", err)
 	}
+	var pending int
+	if err := f.Store.db.QueryRow("SELECT reconciliation_pending FROM traffic_ledgers WHERE machine_id=?", f.Machine.MachineID).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("recovery gap did not freeze reconciliation: %d/%v", pending, err)
+	}
 	withHeld := missing
 	withHeld.Held = []protocol.CloseRange{{First: 2, Last: 2}}
 	if response, err := f.Store.RecoverTraffic(context.Background(), f.Machine.MachineID, withHeld, time.Now()); err != nil || !response.Resume {
 		t.Fatalf("held final recovery = (%+v, %v)", response, err)
+	}
+	if err := f.Store.db.QueryRow("SELECT reconciliation_pending FROM traffic_ledgers WHERE machine_id=?", f.Machine.MachineID).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("successful recovery did not clear reconciliation: %d/%v", pending, err)
 	}
 	first := f.segment(t, 10, 10, true, 1, "")
 	ack = ingestTraffic(t, f, trafficRequest(t, f, first), protocol.TrafficRow{Segment: first})

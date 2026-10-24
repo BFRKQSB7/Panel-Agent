@@ -6,6 +6,7 @@
 <label>监听端口 <input type="number" name="listen_port" value="{{if .ListenPort}}{{.ListenPort}}{{end}}" min="1" max="65535" required></label>
 <label>Reality SNI <input name="server_name" value="{{.ServerName}}" required></label>
 <label>Reality 目标 <input name="target" value="{{.Target}}" placeholder="主机:端口" required></label>
+<label>节点默认用户额度（字节，留空不限；0 为零） <input name="quota_bytes" value="{{if .QuotaBytes}}{{.QuotaBytes}}{{end}}" inputmode="numeric" pattern="[0-9]+" maxlength="19" placeholder="不限"></label>
 <label><input type="checkbox" name="enabled" value="true" {{if .Enabled}}checked{{end}}>启用节点</label>
 <label class="development"><input type="checkbox" name="development" value="true" {{if .Development}}checked{{end}}>启用开发凭证，仅用于隔离测试</label>
 {{end}}

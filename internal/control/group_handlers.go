@@ -165,7 +165,7 @@ func writeDomainError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, storage.ErrGroupNotFound), errors.Is(err, storage.ErrUserNotFound):
 		status, message = http.StatusNotFound, "用户、组或关联对象不存在。"
-	case errors.Is(err, storage.ErrInvalidUser), errors.Is(err, storage.ErrInvalidGroup):
+	case errors.Is(err, storage.ErrInvalidUser), errors.Is(err, storage.ErrInvalidGroup), errors.Is(err, storage.ErrInvalidQuota):
 		status, message = http.StatusBadRequest, "字段、组关系、到期时间或额度无效。"
 	case errors.Is(err, storage.ErrNameConflict):
 		status, message = http.StatusConflict, "名称已被使用。"

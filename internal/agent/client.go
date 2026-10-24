@@ -330,6 +330,10 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		status := c.core.Status()
 		request.CoreGeneration, request.CoreInstanceID = status.Generation, status.InstanceID
 		request.AppliedAuthorityEpoch, request.AppliedRevision, request.AppliedDigest = status.AuthorityEpoch, status.Revision, status.Digest
+		request.AppliedRestrictionDigest = status.RestrictionDigest
+		if !status.RestrictionAppliedAt.IsZero() {
+			request.RestrictionAppliedAt = status.RestrictionAppliedAt.UTC().Format(time.RFC3339Nano)
+		}
 		request.Applied = status.Running && status.AuthorityEpoch == c.identity.AuthorityEpoch && status.Revision == c.identity.Revision && status.Digest == c.identity.Digest
 		request.ApplyError = status.Error
 		if !request.Applied && request.ApplyError == "" {

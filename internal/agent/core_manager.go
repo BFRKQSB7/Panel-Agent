@@ -25,15 +25,17 @@ import (
 )
 
 type coreConfigRecord struct {
-	AuthorityEpoch  string             `json:"authority_epoch"`
-	Revision        uint64             `json:"revision"`
-	Digest          string             `json:"digest"`
-	ConfigHash      string             `json:"config_hash"`
-	Mappings        []xray.StatMapping `json:"mappings"`
-	Listeners       []string           `json:"listeners"`
-	HasSource       bool               `json:"has_source,omitempty"`
-	PeriodPolicies  []period.Policy    `json:"period_policies,omitempty"`
-	PolicyAppliedAt time.Time          `json:"policy_applied_at,omitempty"`
+	AuthorityEpoch       string             `json:"authority_epoch"`
+	Revision             uint64             `json:"revision"`
+	Digest               string             `json:"digest"`
+	ConfigHash           string             `json:"config_hash"`
+	Mappings             []xray.StatMapping `json:"mappings"`
+	Listeners            []string           `json:"listeners"`
+	HasSource            bool               `json:"has_source,omitempty"`
+	PeriodPolicies       []period.Policy    `json:"period_policies,omitempty"`
+	PolicyAppliedAt      time.Time          `json:"policy_applied_at,omitempty"`
+	RestrictionDigest    string             `json:"restriction_digest,omitempty"`
+	RestrictionAppliedAt time.Time          `json:"restriction_applied_at,omitempty"`
 }
 
 type coreJournal struct {
@@ -53,13 +55,15 @@ type coreJournal struct {
 }
 
 type CoreApplyStatus struct {
-	Generation     uint64 `json:"core_generation"`
-	InstanceID     string `json:"core_instance_id"`
-	AuthorityEpoch string `json:"applied_authority_epoch"`
-	Revision       uint64 `json:"applied_revision"`
-	Digest         string `json:"applied_digest"`
-	Running        bool   `json:"running"`
-	Error          string `json:"apply_error,omitempty"`
+	Generation           uint64    `json:"core_generation"`
+	InstanceID           string    `json:"core_instance_id"`
+	AuthorityEpoch       string    `json:"applied_authority_epoch"`
+	Revision             uint64    `json:"applied_revision"`
+	Digest               string    `json:"applied_digest"`
+	RestrictionDigest    string    `json:"applied_restriction_digest"`
+	RestrictionAppliedAt time.Time `json:"restriction_applied_at,omitempty"`
+	Running              bool      `json:"running"`
+	Error                string    `json:"apply_error,omitempty"`
 }
 
 // CoreManager is the single serialized boundary for apply, recovery and later
@@ -169,7 +173,7 @@ func (m *CoreManager) load() error {
 		return errors.New("unknown persisted Core phase")
 	}
 	for _, record := range []*coreConfigRecord{state.Current, state.LKG, state.Candidate} {
-		if record != nil && (!security.IsUUIDv4(record.AuthorityEpoch) || record.Revision == 0 || !security.IsValidDigest(record.Digest) || !security.IsValidDigest(record.ConfigHash)) {
+		if record != nil && (!security.IsUUIDv4(record.AuthorityEpoch) || record.Revision == 0 || !security.IsValidDigest(record.Digest) || !security.IsValidDigest(record.ConfigHash) || record.RestrictionDigest != "" && !security.IsValidDigest(record.RestrictionDigest)) {
 			return errors.New("invalid persisted Core config reference")
 		}
 	}
@@ -193,6 +197,15 @@ func (m *CoreManager) save(state coreJournal) error {
 			} else if copy.PolicyAppliedAt.IsZero() {
 				copy.PolicyAppliedAt = m.state.Current.PolicyAppliedAt
 			}
+		}
+		if m.state.Current == nil {
+			if copy.RestrictionAppliedAt.IsZero() {
+				copy.RestrictionAppliedAt = time.Now().UTC()
+			}
+		} else if copy.RestrictionDigest != m.state.Current.RestrictionDigest {
+			copy.RestrictionAppliedAt = time.Now().UTC()
+		} else if copy.RestrictionAppliedAt.IsZero() {
+			copy.RestrictionAppliedAt = m.state.Current.RestrictionAppliedAt
 		}
 		state.Current = &copy
 	}
@@ -519,10 +532,25 @@ func (m *CoreManager) apply(ctx context.Context, epoch string, revision uint64, 
 		return m.fail(protocol.ErrorCoreConfigInvalid)
 	}
 	hash := sha256.Sum256(rendered.Bytes)
+	effectiveRestrictions := desired.QuotaRestrictions
+	if !confirmedPolicy && m.state.PermissionDigest != "" {
+		floor, floorErr := m.readDesired(&coreConfigRecord{Digest: m.state.PermissionDigest})
+		if floorErr != nil {
+			return floorErr
+		}
+		effectiveRestrictions, err = protocol.MergeQuotaRestrictions(floor.QuotaRestrictions, desired.QuotaRestrictions)
+		if err != nil {
+			return m.fail(protocol.ErrorCoreConfigInvalid)
+		}
+	}
+	restrictionDigest, err := effectiveRestrictions.Digest()
+	if err != nil {
+		return m.fail(protocol.ErrorCoreConfigInvalid)
+	}
 	if err := m.persistDesired(digest, desired); err != nil {
 		return m.fail(protocol.ErrorCoreStorageFailed)
 	}
-	candidate := &coreConfigRecord{AuthorityEpoch: epoch, Revision: revision, Digest: digest, ConfigHash: hex.EncodeToString(hash[:]), Mappings: rendered.Mappings, Listeners: rendered.Listeners, HasSource: true, PeriodPolicies: desired.PeriodPolicies}
+	candidate := &coreConfigRecord{AuthorityEpoch: epoch, Revision: revision, Digest: digest, ConfigHash: hex.EncodeToString(hash[:]), Mappings: rendered.Mappings, Listeners: rendered.Listeners, HasSource: true, PeriodPolicies: desired.PeriodPolicies, RestrictionDigest: restrictionDigest}
 	if !confirmedPolicy && m.state.PermissionDigest != "" {
 		floor, err := m.readDesired(&coreConfigRecord{Digest: m.state.PermissionDigest})
 		if err != nil {
@@ -690,6 +718,7 @@ func (m *CoreManager) Status() CoreApplyStatus {
 	status := CoreApplyStatus{Generation: m.state.Generation, InstanceID: m.state.InstanceID, Error: m.state.LastError}
 	if current := m.state.Current; current != nil {
 		status.AuthorityEpoch, status.Revision, status.Digest = current.AuthorityEpoch, current.Revision, current.Digest
+		status.RestrictionDigest, status.RestrictionAppliedAt = current.RestrictionDigest, current.RestrictionAppliedAt
 		if m.state.Process != nil {
 			actual, err := inspectCoreProcess(m.state.Process.PID, m.binary)
 			status.Running = err == nil && actual == *m.state.Process && actual.ConfigPath == m.configPath(current)

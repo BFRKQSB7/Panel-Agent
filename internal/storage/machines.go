@@ -35,35 +35,37 @@ type PanelAuthority struct {
 }
 
 type MachineRecord struct {
-	MachineID             string
-	RegistrationID        string
-	TokenHash             string
-	Hostname              string
-	DisplayName           string
-	Notes                 string
-	OS                    string
-	Architecture          string
-	CPUCount              int
-	MemoryBytes           uint64
-	AgentVersion          string
-	AuthorityEpoch        string
-	DesiredRevision       uint64
-	DesiredDigest         string
-	ReceivedRevision      uint64
-	ReceivedDigest        string
-	AppliedRevision       uint64
-	AppliedDigest         string
-	AppliedAuthorityEpoch string
-	CoreGeneration        uint64
-	CoreInstanceID        string
-	ApplyError            string
-	PendingAuthorityEpoch string
-	PendingAuthorityNonce string
-	LastAuthorityNonce    string
-	LastHeartbeatAt       string
-	Revoked               bool
-	CreatedAt             string
-	UpdatedAt             string
+	MachineID                string
+	RegistrationID           string
+	TokenHash                string
+	Hostname                 string
+	DisplayName              string
+	Notes                    string
+	OS                       string
+	Architecture             string
+	CPUCount                 int
+	MemoryBytes              uint64
+	AgentVersion             string
+	AuthorityEpoch           string
+	DesiredRevision          uint64
+	DesiredDigest            string
+	ReceivedRevision         uint64
+	ReceivedDigest           string
+	AppliedRevision          uint64
+	AppliedDigest            string
+	AppliedAuthorityEpoch    string
+	CoreGeneration           uint64
+	CoreInstanceID           string
+	AppliedRestrictionDigest string
+	RestrictionAppliedAt     string
+	ApplyError               string
+	PendingAuthorityEpoch    string
+	PendingAuthorityNonce    string
+	LastAuthorityNonce       string
+	LastHeartbeatAt          string
+	Revoked                  bool
+	CreatedAt                string
+	UpdatedAt                string
 }
 
 type RegisterMachineInput struct {
@@ -270,6 +272,13 @@ func displayName(name, hostname string) string {
 	return strings.TrimSpace(name)
 }
 
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 func (s *Store) RecoverRegistration(ctx context.Context, registrationID, tokenHash string) (MachineRecord, error) {
 	var machine MachineRecord
 	err := scanMachine(s.db.QueryRowContext(ctx, machineSelect+" WHERE registration_id = ? AND token_hash = ? AND revoked_at IS NULL", registrationID, tokenHash), &machine)
@@ -298,7 +307,8 @@ const machineSelect = `SELECT machine_id, registration_id, token_hash, hostname,
 	cpu_count, memory_bytes, agent_version, authority_epoch, desired_revision, desired_digest,
 	received_revision, received_digest, applied_revision, applied_digest, apply_error,
 	pending_authority_epoch, pending_authority_nonce, last_authority_nonce, last_heartbeat_at,
-	revoked_at, created_at, updated_at, applied_authority_epoch, core_generation, core_instance_id FROM machines`
+	revoked_at, created_at, updated_at, applied_authority_epoch, core_generation, core_instance_id,
+	applied_restriction_digest, restriction_applied_at FROM machines`
 
 func (s *Store) GetMachine(ctx context.Context, machineID string) (MachineRecord, error) {
 	var machine MachineRecord
@@ -334,13 +344,13 @@ func (s *Store) ListMachines(ctx context.Context) ([]MachineRecord, error) {
 
 func scanMachine(scanner rowScanner, machine *MachineRecord) error {
 	var cpuCount, memoryBytes, desiredRevision, receivedRevision, appliedRevision, coreGeneration int64
-	var pendingEpoch, pendingNonce, lastNonce, heartbeat, revoked sql.NullString
+	var pendingEpoch, pendingNonce, lastNonce, heartbeat, revoked, restrictionAppliedAt sql.NullString
 	err := scanner.Scan(
 		&machine.MachineID, &machine.RegistrationID, &machine.TokenHash, &machine.Hostname, &machine.DisplayName, &machine.Notes,
 		&machine.OS, &machine.Architecture, &cpuCount, &memoryBytes, &machine.AgentVersion, &machine.AuthorityEpoch,
 		&desiredRevision, &machine.DesiredDigest, &receivedRevision, &machine.ReceivedDigest, &appliedRevision, &machine.AppliedDigest,
 		&machine.ApplyError, &pendingEpoch, &pendingNonce, &lastNonce, &heartbeat, &revoked, &machine.CreatedAt, &machine.UpdatedAt,
-		&machine.AppliedAuthorityEpoch, &coreGeneration, &machine.CoreInstanceID,
+		&machine.AppliedAuthorityEpoch, &coreGeneration, &machine.CoreInstanceID, &machine.AppliedRestrictionDigest, &restrictionAppliedAt,
 	)
 	if err != nil {
 		return err
@@ -358,6 +368,7 @@ func scanMachine(scanner rowScanner, machine *MachineRecord) error {
 	machine.PendingAuthorityNonce = pendingNonce.String
 	machine.LastAuthorityNonce = lastNonce.String
 	machine.LastHeartbeatAt = heartbeat.String
+	machine.RestrictionAppliedAt = restrictionAppliedAt.String
 	machine.Revoked = revoked.Valid
 	return nil
 }
@@ -518,7 +529,19 @@ func (s *Store) RecordMachineStatus(ctx context.Context, machineID string, reque
 	if request.Digest != authority.Digest {
 		return "", ErrDigestMismatch
 	}
-	if request.CoreGeneration == 0 && (request.Applied || request.AppliedRevision != 0 || request.AppliedDigest != "" || request.AppliedAuthorityEpoch != "" || request.CoreInstanceID != "") {
+	desiredRestrictionDigest, err := authority.Snapshot.QuotaRestrictions.Digest()
+	if err != nil {
+		return "", fmt.Errorf("calculate restriction digest: %w", err)
+	}
+	if request.AppliedRestrictionDigest != "" && !security.IsValidDigest(request.AppliedRestrictionDigest) {
+		return "", ErrDigestMismatch
+	}
+	if request.RestrictionAppliedAt != "" {
+		if _, err := time.Parse(time.RFC3339Nano, request.RestrictionAppliedAt); err != nil {
+			return "", ErrDigestMismatch
+		}
+	}
+	if request.CoreGeneration == 0 && (request.Applied || request.AppliedRevision != 0 || request.AppliedDigest != "" || request.AppliedAuthorityEpoch != "" || request.CoreInstanceID != "" || request.AppliedRestrictionDigest != "" || request.RestrictionAppliedAt != "") {
 		return "", ErrCoreNotImplemented
 	}
 	if !request.Received {
@@ -552,20 +575,34 @@ func (s *Store) RecordMachineStatus(ctx context.Context, machineID string, reque
 		} else if request.AppliedAuthorityEpoch != "" || request.AppliedDigest != "" {
 			return "", ErrDigestMismatch
 		}
+		if request.AppliedRestrictionDigest == "" && request.RestrictionAppliedAt != "" || request.AppliedRestrictionDigest != "" && request.RestrictionAppliedAt == "" {
+			return "", ErrDigestMismatch
+		}
 		if request.Applied && (applyError != "" || request.AppliedAuthorityEpoch != request.AuthorityEpoch || request.AppliedRevision != request.Revision || request.AppliedDigest != request.Digest) {
 			return "", ErrDigestMismatch
 		}
+		if request.Applied && request.AppliedRestrictionDigest != "" && request.AppliedRestrictionDigest != desiredRestrictionDigest {
+			return "", ErrDigestMismatch
+		}
 		machine.AppliedAuthorityEpoch, machine.AppliedRevision, machine.AppliedDigest = request.AppliedAuthorityEpoch, request.AppliedRevision, request.AppliedDigest
+		if request.AppliedRestrictionDigest != "" {
+			machine.AppliedRestrictionDigest = request.AppliedRestrictionDigest
+		}
+		if request.RestrictionAppliedAt != "" {
+			machine.RestrictionAppliedAt = request.RestrictionAppliedAt
+		}
 		machine.CoreGeneration, machine.CoreInstanceID = request.CoreGeneration, request.CoreInstanceID
 	}
 	nowText := now.UTC().Format(time.RFC3339Nano)
 	_, err = tx.ExecContext(ctx, `UPDATE machines SET hostname = ?, display_name = CASE WHEN ? = '' THEN display_name ELSE ? END,
 		os = ?, architecture = ?, cpu_count = ?, memory_bytes = ?, agent_version = ?, received_revision = ?,
 		received_digest = ?, apply_error = ?, last_heartbeat_at = ?, updated_at = ?,
-		applied_authority_epoch = ?, applied_revision = ?, applied_digest = ?, core_generation = ?, core_instance_id = ? WHERE machine_id = ?`,
+		applied_authority_epoch = ?, applied_revision = ?, applied_digest = ?, core_generation = ?, core_instance_id = ?,
+		applied_restriction_digest = ?, restriction_applied_at = ? WHERE machine_id = ?`,
 		request.Hostname, request.DisplayName, strings.TrimSpace(request.DisplayName), request.OS, request.Architecture,
 		request.CPUCount, request.MemoryBytes, request.AgentVersion, request.Revision, request.Digest, applyError,
-		nowText, nowText, machine.AppliedAuthorityEpoch, machine.AppliedRevision, machine.AppliedDigest, machine.CoreGeneration, machine.CoreInstanceID, machineID)
+		nowText, nowText, machine.AppliedAuthorityEpoch, machine.AppliedRevision, machine.AppliedDigest, machine.CoreGeneration, machine.CoreInstanceID,
+		machine.AppliedRestrictionDigest, nullableString(machine.RestrictionAppliedAt), machineID)
 	if err != nil {
 		return "", fmt.Errorf("persist machine status: %w", err)
 	}
@@ -583,5 +620,6 @@ func MachineViewFromRecord(record MachineRecord) protocol.MachineView {
 		ReceivedRevision: record.ReceivedRevision, ReceivedDigest: record.ReceivedDigest, AppliedRevision: record.AppliedRevision,
 		AppliedDigest: record.AppliedDigest, ApplyError: record.ApplyError, LastHeartbeat: record.LastHeartbeatAt, Revoked: record.Revoked,
 		AppliedAuthorityEpoch: record.AppliedAuthorityEpoch, CoreGeneration: record.CoreGeneration, CoreInstanceID: record.CoreInstanceID,
+		AppliedRestrictionDigest: record.AppliedRestrictionDigest, RestrictionAppliedAt: record.RestrictionAppliedAt,
 	}
 }

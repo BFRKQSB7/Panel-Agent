@@ -14,6 +14,8 @@ type userEditor struct {
 	User                          storage.UserRecord
 	GroupChoices                  []groupChoice
 	Nodes                         []storage.NodeRecord
+	Quota                         storage.UserQuotaSummary
+	QuotaStatus                   string
 	Reasons                       []string
 	CSRF, QuotaValue, ExpiryValue string
 }
@@ -73,14 +75,22 @@ func (s *Server) renderUsersPage(w http.ResponseWriter, r *http.Request, results
 		return editor
 	}
 	rows := []userEditor{}
+	now := time.Now()
 	for _, user := range users {
-		access, err := s.store.GetUserAccess(r.Context(), user.UserID, time.Now())
+		access, err := s.store.GetUserAccess(r.Context(), user.UserID, now)
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+		quota, err := s.store.GetUserQuotaSummary(r.Context(), user.UserID, now)
 		if err != nil {
 			writeDomainError(w, err)
 			return
 		}
 		editor := makeEditor(access.User)
 		editor.Nodes = access.Nodes
+		editor.Quota = quota
+		editor.QuotaStatus = quotaUsageStatus(quota.Global.Status, quota.Global.PendingReconcile)
 		for _, reason := range access.UnavailableReasons {
 			switch reason {
 			case "manually_disabled":
