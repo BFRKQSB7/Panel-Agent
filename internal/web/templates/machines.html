@@ -49,6 +49,20 @@
       <p>最近心跳：{{if .LastHeartbeat}}{{.LastHeartbeat}}{{else}}尚未收到{{end}}；收到 revision：{{.ReceivedRevision}}；应用 revision：{{.AppliedRevision}}；状态：{{if .Revoked}}已吊销{{else}}有效{{end}} {{if .ApplyError}}（{{.ApplyError}}）{{end}}</p>
       <p>本周期机器实际用量：{{.Quota.Usage.UsedBytes}} 字节；预算：{{if .Quota.Budget.BudgetBytes}}{{.Quota.Budget.BudgetBytes}}{{else}}不限{{end}}；剩余：{{if .Quota.Usage.RemainingBytes}}{{.Quota.Usage.RemainingBytes}}{{else}}—{{end}}；{{if .Quota.Usage.PendingReconcile}}待对账（限制保持当前已确认状态）{{else if .Quota.SoftWarning}}已达到软警告{{else if .Quota.Usage.Status}}正常{{else}}无限制{{end}}。</p>
       <form method="post" action="/admin/machines/{{.MachineID}}/quota"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>预算模式 <select name="budget_mode"><option value="unlimited" {{if not .Quota.Budget.BudgetBytes}}selected{{end}}>不限</option><option value="limit" {{if .Quota.Budget.BudgetBytes}}selected{{end}}>指定预算</option></select></label><label>预算（字节） <input name="budget_bytes" value="{{if .Quota.Budget.BudgetBytes}}{{.Quota.Budget.BudgetBytes}}{{end}}" inputmode="numeric" pattern="[0-9]+" maxlength="19"></label><label>软警告（字节，可留空） <input name="warning_bytes" value="{{if .Quota.Budget.WarningBytes}}{{.Quota.Budget.WarningBytes}}{{end}}" inputmode="numeric" pattern="[0-9]+" maxlength="19"></label><label><input type="checkbox" name="hard_stop" value="true" {{if .Quota.Budget.HardStop}}checked{{end}}>达到预算后停止机器全部代理入口</label><button type="submit">保存机器预算</button></form>
+      {{if .Quota.Usage.PendingReconcile}}
+      <h3>恢复后流量对账</h3>
+      <p class="muted">只登记 Agent recovery 请求中已由旧关闭凭据证明、且 Panel 与 Agent 都没有明细的连续缺口。仍在 held ranges 中的范围必须先让 Agent 重报，缺口登记不会增加任何字节。</p>
+      <form method="post" action="/admin/machines/{{.MachineID}}/traffic-recovery-gap">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input name="ledger_epoch" placeholder="ledger_epoch" required>
+        <input name="agent_allocated" placeholder="Agent allocated_close_seq" inputmode="numeric" required>
+        <input name="first_seq" placeholder="缺口 first_seq" inputmode="numeric" required>
+        <input name="last_seq" placeholder="缺口 last_seq" inputmode="numeric" required>
+        <textarea name="held_ranges_json" placeholder='held ranges JSON，例如 [{"first":"11","last":"20"}]'></textarea>
+        <textarea name="receipt_json" placeholder="Agent closed receipt JSON" required></textarea>
+        <button class="danger" type="submit">登记已证明的 recovery gap</button>
+      </form>
+      {{end}}
       <form method="post" action="/admin/quotas/reset"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="kind" value="machine"><input type="hidden" name="machine_id" value="{{.MachineID}}"><input type="hidden" name="return_to" value="/admin/machines"><button type="submit">重置机器周期</button></form>
       <form method="post" action="/admin/machines/{{.MachineID}}/details">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">

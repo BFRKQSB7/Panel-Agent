@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -28,6 +29,9 @@ var migrationFiles embed.FS
 type Store struct {
 	db        *sql.DB
 	masterKey []byte
+	dataDir   string
+	database  string
+	backupMu  sync.Mutex
 }
 
 type Settings struct {
@@ -71,7 +75,7 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	store := &Store{db: db, masterKey: masterKey}
+	store := &Store{db: db, masterKey: masterKey, dataDir: filepath.Dir(databasePath), database: databasePath}
 	if err := store.ensurePanelAuthority(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err

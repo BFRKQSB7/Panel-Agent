@@ -9,8 +9,11 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"panel-agent.local/panel-agent/internal/backup"
 	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
 	"panel-agent.local/panel-agent/internal/web"
@@ -28,6 +31,9 @@ type Server struct {
 	probeLimiter chan struct{}
 	templates    *template.Template
 	actions      *security.ActionSigner
+	requestGate  sync.RWMutex
+	restoreMu    sync.Mutex
+	restoring    atomic.Bool
 }
 
 func NewServer(config Config) (*Server, error) {
@@ -42,6 +48,10 @@ func NewServer(config Config) (*Server, error) {
 	processLock, err := storage.AcquireProcessLock(dataDir)
 	if err != nil {
 		return nil, err
+	}
+	if err := backup.RecoverPending(dataDir); err != nil {
+		_ = processLock.Close()
+		return nil, fmt.Errorf("recover pending Panel restore: %w", err)
 	}
 	master, err := security.LoadOrCreateMasterKey(dataDir, filepath.Join(dataDir, storage.DatabaseFileName))
 	if err != nil {
@@ -143,6 +153,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/admin", s.handleAdmin)
 	mux.HandleFunc("/admin/settings", s.handleSettingsForm)
+	mux.HandleFunc("POST /admin/backup/export", s.handleBackupExport)
+	mux.HandleFunc("POST /admin/backup/restore", s.handleBackupRestore)
+	mux.HandleFunc("POST /api/admin/backup/export", s.handleBackupExportAPI)
+	mux.HandleFunc("POST /api/admin/backup/restore", s.handleBackupRestoreAPI)
+	mux.HandleFunc("POST /admin/machines/{machineID}/traffic-recovery-gap", s.handleTrafficRecoveryGapForm)
 	mux.HandleFunc("GET /admin/machines", s.handleMachinesPage)
 	mux.HandleFunc("GET /admin/extensions", s.handleExtensionsPage)
 	mux.HandleFunc("POST /admin/extensions/import", s.handleExtensionImport)
@@ -175,6 +190,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/admin/machines/{machineID}/exit", s.handleExitAPI)
 	mux.HandleFunc("POST /api/admin/machines/{machineID}/exit/rotate", s.handleExitRotateAPI)
 	mux.HandleFunc("POST /api/admin/machines/{machineID}/nodes/{nodeID}/connectivity-check", s.handleNodeConnectivityCheck)
+	mux.HandleFunc("POST /api/admin/machines/{machineID}/traffic-recovery-gap", s.handleTrafficRecoveryGapAPI)
 	mux.HandleFunc("GET /assets/connectivity.js", s.handleConnectivityScript)
 	mux.HandleFunc("GET /admin/groups", s.handleGroupsPage)
 	mux.HandleFunc("POST /admin/groups/{kind}", s.handleGroupForm)
@@ -219,7 +235,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/agent/status", s.handleMachineStatus)
 	mux.HandleFunc("POST /api/v1/agent/traffic/recover", s.handleTrafficRecovery)
 	mux.HandleFunc("POST /api/v1/agent/traffic", s.handleTrafficIngest)
-	return s.securityHeaders(accessLog(mux))
+	return s.securityHeaders(s.requestGateMiddleware(accessLog(mux)))
+}
+
+func (s *Server) requestGateMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && (r.URL.Path == "/admin/backup/restore" || r.URL.Path == "/api/admin/backup/restore") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.restoring.Load() {
+			http.Error(w, "Panel 正在恢复，请稍后重试。", http.StatusServiceUnavailable)
+			return
+		}
+		s.requestGate.RLock()
+		defer s.requestGate.RUnlock()
+		if s.restoring.Load() {
+			http.Error(w, "Panel 正在恢复，请稍后重试。", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) Serve(ctx context.Context) error {

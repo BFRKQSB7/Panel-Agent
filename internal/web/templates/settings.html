@@ -22,6 +22,23 @@
       <input id="site_name" name="site_name" value="{{.SiteName}}" maxlength="64" required>
       <button type="submit">保存设置</button>
     </form>
+    <h2>一致性备份与恢复</h2>
+    <p>备份包含 SQLite 一致性快照、master key、机器身份、加密凭据和协议扩展。可选密码使用认证加密；恢复会清除旧登录会话与未消费接入凭据，生成新的配置 authority，并将流量状态置为待对账。</p>
+    <form method="post" action="/admin/backup/export">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="backup_password">备份密码（可留空；建议设置）</label>
+      <input id="backup_password" name="password" type="password" maxlength="4096" autocomplete="new-password">
+      <button type="submit">下载一致性备份</button>
+    </form>
+    <form method="post" action="/admin/backup/restore" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="backup_file">备份包</label>
+      <input id="backup_file" name="backup" type="file" accept="application/json,.json" required>
+      <label for="restore_password">备份密码（如有）</label>
+      <input id="restore_password" name="password" type="password" maxlength="4096" autocomplete="new-password">
+      <button class="danger" type="submit">验证并恢复</button>
+    </form>
+    <p class="muted">恢复失败不会覆盖当前可用数据。恢复成功后需要重新登录；Agent 会通过一次性 authority 握手重新接收完整配置。旧备份无法找回已被 Agent 清理且 Panel 也没有明细的流量，只有带旧关闭凭据且确认双方均无明细的连续范围才能登记为 recovery gap，且不补造字节。</p>
     <form method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit">退出登录</button>
