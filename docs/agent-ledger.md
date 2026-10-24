@@ -28,7 +28,7 @@ Panel 为用户全局、用户×入口及机器分别持久创建默认月策略
 
 只有关闭前缀与完整凭据在**同一个清理事务**中保存成功，才删除被覆盖的本地 final 明细；普通或单独 final ACK 不足以删除。序号有洞就不能跨越清理。Agent 检查凭据作用域和格式，通过已认证通道信任 Panel；它不持有 master key。Panel 用 master key 派生的 HMAC-SHA256 验证恢复证明，证明只能指示曾提交范围，不能重建缺失字节。
 
-当前 D08 的正式 Panel 尚未接入入账 SQL，生产快照保持 `traffic_reporting_enabled=false`：Agent 在本地持续累计，发送／ACK 流程已通过确定性 HTTPS 接收器验证。只有后续 D09 接入正式恢复与入账端点后，Panel 才可下发启用标志。当前页面仍不宣称已有可靠余额或执行配额。
+D09 已接入正式 Panel 恢复与入账端点：Panel 以 `(machine_id, ledger_epoch, stream_id, segment_id)` 做幂等键，保存累计水位、原始逐行报告和 period 用量，逐行隔离坏行，并只对连续 final 前缀签发关闭回执；数据库事务失败不会返回成功 ACK。当前页面仍不宣称已有可靠余额或执行配额，额度执行与真实用量页面由 D10 接入。
 
 ## 诊断与验证
 

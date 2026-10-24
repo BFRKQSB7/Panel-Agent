@@ -1,6 +1,6 @@
 # 周期与流量协议
 
-`internal/period` 是 Panel 与 Agent 共用的纯计算模块；`internal/protocol/traffic.go` 是版本 1 累计报告与确认契约。D07 提供算法、校验和可执行例子，D08 已接入 [Agent 持久采样与恢复](agent-ledger.md)；正式 Panel 入账、额度执行与周期管理页面仍由后续任务接入。既有用户配额 API 已采用下述精确字符串格式，SQLite 原有整数列无需迁移。
+`internal/period` 是 Panel 与 Agent 共用的纯计算模块；`internal/protocol/traffic.go` 是版本 1 累计报告与确认契约。D07 提供算法、校验和可执行例子，D08 已接入 [Agent 持久采样与恢复](agent-ledger.md)，D09 已接入 Panel 正式恢复/入账端点、K 水位、逐行报告、连续关闭前缀与签名回执；额度执行与周期管理页面仍由 D10 接入。既有用户配额 API 已采用下述精确字符串格式，SQLite 原有整数列无需迁移。
 
 ## 周期规则
 

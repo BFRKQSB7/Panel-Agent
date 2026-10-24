@@ -42,6 +42,37 @@ type TrafficRecoveryResponse struct {
 	Receipt        *security.ClosedReceipt `json:"receipt,omitempty"`
 }
 
+// ValidateEnvelope checks only the recovery header and the locally held final
+// sequence ranges. The Panel still authenticates the machine and verifies the
+// receipt MAC before changing any persisted state.
+func (r TrafficRecoveryRequest) ValidateEnvelope() error {
+	if r.Version != TrafficVersion || !security.IsUUIDv4(r.RequestID) ||
+		!security.IsUUIDv4(r.AuthorityEpoch) || !security.IsUUIDv4(r.MachineID) ||
+		!security.IsUUIDv4(r.LedgerEpoch) || r.Allocated > 1<<63-1 {
+		return ErrTraffic
+	}
+	if r.InstallationID != "" && !security.IsUUIDv4(r.InstallationID) {
+		return ErrTraffic
+	}
+	if r.Receipt != nil {
+		if r.Receipt.ClosedClaims.Validate() != nil ||
+			r.Receipt.MachineID != r.MachineID ||
+			r.Receipt.LedgerEpoch != r.LedgerEpoch ||
+			r.Receipt.ClosedThrough > r.Allocated {
+			return ErrTraffic
+		}
+	}
+	var previous uint64
+	for i, held := range r.Held {
+		if held.First == 0 || held.Last < held.First || held.Last > r.Allocated ||
+			(i > 0 && held.First <= previous) {
+			return ErrTraffic
+		}
+		previous = held.Last
+	}
+	return nil
+}
+
 var ErrTraffic = errors.New("无效或冲突的流量报告")
 
 type SegmentKey struct {

@@ -24,6 +24,9 @@ const (
 	ErrorInvalidMessage          = "invalid_message"
 	ErrorCoreNotImplemented      = "core_not_implemented"
 	ErrorDesiredStateNotReceived = "desired_state_not_received"
+	ErrorTrafficState            = "traffic_state_conflict"
+	ErrorTrafficRecoveryGap      = "traffic_recovery_gap"
+	ErrorTrafficReceipt          = "traffic_receipt_invalid"
 )
 
 type ErrorResponse struct {

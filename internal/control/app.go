@@ -188,6 +188,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/machines/recover", s.handleMachineRecovery)
 	mux.HandleFunc("POST /api/v1/agent/desired-state", s.handleDesiredState)
 	mux.HandleFunc("POST /api/v1/agent/status", s.handleMachineStatus)
+	mux.HandleFunc("POST /api/v1/agent/traffic/recover", s.handleTrafficRecovery)
+	mux.HandleFunc("POST /api/v1/agent/traffic", s.handleTrafficIngest)
 	return s.securityHeaders(accessLog(mux))
 }
 
