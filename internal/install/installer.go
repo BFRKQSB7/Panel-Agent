@@ -81,8 +81,9 @@ type PathOwnership struct {
 }
 
 type CoreOwnership struct {
-	Owner CoreOwner `json:"owner"`
-	Path  string    `json:"path,omitempty"`
+	Owner        CoreOwner `json:"owner"`
+	Path         string    `json:"path,omitempty"`
+	PreviousPath string    `json:"previous_path,omitempty"`
 }
 
 type Manifest struct {
@@ -291,8 +292,21 @@ func installRole(options Options, role Role) (Manifest, error) {
 	}
 
 	ownedSet := make(map[string]bool, len(paths))
-	for _, path := range paths {
+	for _, path := range manifest.Paths {
 		ownedSet[path.Path] = true
+	}
+	previousCore := ""
+	if role == RoleAgent {
+		previousCore = manifest.Core.PreviousPath
+	}
+	if role == RoleAgent && found && manifest.Core.Owner == CoreProject && manifest.Core.Path != RuntimeCorePath(options) {
+		if _, e := os.Lstat(filepath.Join(dataDir, "core", "upgrade.json")); e == nil || !errors.Is(e, os.ErrNotExist) {
+			return Manifest{}, errors.New("请先恢复未完成的 Core 升级，再重装")
+		}
+		previousCore = manifest.Core.Path
+	}
+	if previousCore != "" && options.CoreOwner == CoreProject {
+		paths = append(paths, legacyCoreOwnership(options, role))
 	}
 	created := []string{}
 	rollback := true
@@ -314,7 +328,20 @@ func installRole(options Options, role Role) (Manifest, error) {
 			return Manifest{}, err
 		}
 		if options.CoreOwner == CoreProject {
-			if err := installBinary(options.XrayBinary, filepath.Join(options.ProjectRoot, "bin", "xray"), found && ownedSet[filepath.Join(options.ProjectRoot, "bin", "xray")], &created); err != nil {
+			corePath := RuntimeCorePath(options)
+			_, directoryErr := os.Lstat(filepath.Dir(corePath))
+			if directoryErr == nil && !ownedSet[filepath.Dir(corePath)] {
+				return Manifest{}, fmt.Errorf("%w: %s", ErrUnownedPath, filepath.Dir(corePath))
+			} else if directoryErr != nil && !errors.Is(directoryErr, os.ErrNotExist) {
+				return Manifest{}, directoryErr
+			}
+			if err := ensurePathDirectory(filepath.Dir(corePath), 0o700, true); err != nil {
+				return Manifest{}, err
+			}
+			if errors.Is(directoryErr, os.ErrNotExist) {
+				created = append(created, filepath.Dir(corePath))
+			}
+			if err := installBinary(options.XrayBinary, corePath, found && ownedSet[corePath], &created); err != nil {
 				return Manifest{}, err
 			}
 		} else if err := validateExternalCore(options.XrayBinary, dataDir, options.ProjectRoot); err != nil {
@@ -349,7 +376,7 @@ func installRole(options Options, role Role) (Manifest, error) {
 	manifest = Manifest{
 		Version: ManifestVersion, Role: role, ProjectRoot: options.ProjectRoot, DataDir: dataDir,
 		LogRoot: options.LogRoot, SystemdDir: options.SystemdDir,
-		Core: CoreOwnership{Owner: options.CoreOwner, Path: options.XrayBinary}, Paths: paths, InstalledAt: time.Now().UTC(),
+		Core: CoreOwnership{Owner: options.CoreOwner, Path: RuntimeCorePath(options), PreviousPath: previousCore}, Paths: paths, InstalledAt: time.Now().UTC(),
 	}
 	manifestPath := filepath.Join(dataDir, "ownership.json")
 	if err := writeOwnedFile(manifestPath, marshalManifest(manifest), 0o600, found, &created); err != nil {
@@ -456,6 +483,21 @@ func serviceName(role Role) string {
 }
 
 func expectedPaths(options Options, role Role) ([]PathOwnership, error) {
+	return expectedPathsForCore(options, role, RuntimeCorePath(options))
+}
+
+func RuntimeCorePath(options Options) string {
+	if options.CoreOwner == CoreExternal {
+		return options.XrayBinary
+	}
+	return filepath.Join(options.DataRoot, string(RoleAgent), "runtime", "xray")
+}
+
+func legacyCoreOwnership(options Options, role Role) PathOwnership {
+	return PathOwnership{Path: filepath.Join(options.ProjectRoot, "bin", "xray"), Kind: "legacy-core-binary", Role: role, Uninstall: true, Purge: true}
+}
+
+func expectedPathsForCore(options Options, role Role, corePath string) ([]PathOwnership, error) {
 	dataDir := roleDataDir(options, role)
 	paths := []PathOwnership{
 		{Path: dataDir, Kind: "directory", Role: role, Source: "created", Purge: true},
@@ -471,7 +513,10 @@ func expectedPaths(options Options, role Role) ([]PathOwnership, error) {
 	if role == RoleAgent || role == RolePanelAgent {
 		paths = append(paths, PathOwnership{Path: filepath.Join(options.ProjectRoot, "bin", "control-agent"), Kind: "binary", Role: role, Source: options.AgentBinary, Uninstall: true, Purge: true})
 		if options.CoreOwner == CoreProject {
-			paths = append(paths, PathOwnership{Path: filepath.Join(options.ProjectRoot, "bin", "xray"), Kind: "core-binary", Role: role, Source: options.XrayBinary, Uninstall: true, Purge: true})
+			if corePath == RuntimeCorePath(options) {
+				paths = append(paths, PathOwnership{Path: filepath.Dir(corePath), Kind: "directory", Role: role, Source: "created", Purge: true})
+			}
+			paths = append(paths, PathOwnership{Path: corePath, Kind: "core-binary", Role: role, Source: options.XrayBinary, Uninstall: true, Purge: true})
 		}
 	}
 	return paths, nil
@@ -515,9 +560,24 @@ func validateManifest(options Options, role Role, manifest Manifest) error {
 	if manifest.Version != ManifestVersion || manifest.Role != role || manifest.ProjectRoot != options.ProjectRoot || manifest.DataDir != roleDataDir(options, role) || manifest.LogRoot != options.LogRoot || manifest.SystemdDir != options.SystemdDir {
 		return ErrManifest
 	}
-	expected, err := expectedPaths(options, role)
+	checkOptions := options
+	checkOptions.CoreOwner = manifest.Core.Owner
+	expected, err := expectedPaths(checkOptions, role)
 	if err != nil {
 		return err
+	}
+	legacy := role == RoleAgent && manifest.Core.Owner == CoreProject && manifest.Core.Path != RuntimeCorePath(checkOptions)
+	if legacy {
+		expected, err = expectedPathsForCore(checkOptions, role, filepath.Join(options.ProjectRoot, "bin", "xray"))
+		if err != nil {
+			return err
+		}
+	}
+	if !legacy && manifest.Core.PreviousPath != "" && manifest.Core.Owner == CoreProject {
+		if role != RoleAgent {
+			return ErrManifest
+		}
+		expected = append(expected, legacyCoreOwnership(options, role))
 	}
 	expectedByPath := map[string]PathOwnership{}
 	for _, item := range expected {
@@ -538,7 +598,10 @@ func validateManifest(options Options, role Role, manifest Manifest) error {
 	// Uninstall and ownership checks intentionally do not require the original
 	// source path. The recorded manifest remains authoritative; install still
 	// compares it when a source path is supplied so a re-install cannot drift.
-	if manifest.Core.Owner == CoreProject && options.XrayBinary != "" && manifest.Core.Path != options.XrayBinary {
+	if options.XrayBinary != "" && manifest.Core.Owner != options.CoreOwner {
+		return ErrManifest
+	}
+	if legacy && manifest.Core.PreviousPath != "" {
 		return ErrManifest
 	}
 	if manifest.Core.Owner == CoreExternal && manifest.Core.Path == "" {
@@ -709,7 +772,7 @@ func renderUnit(options Options, role Role, dataDir, logPath string) (string, er
 		args = []string{"serve", "--data-dir", dataDir, "--listen", options.ControlListen}
 	case RoleAgent:
 		executable = filepath.Join(options.ProjectRoot, "bin", "control-agent")
-		args = []string{"run", "--data-dir", dataDir, "--xray-path", options.XrayBinary}
+		args = []string{"run", "--data-dir", dataDir, "--xray-path", RuntimeCorePath(options)}
 	default:
 		return "", ErrUnsupportedRole
 	}

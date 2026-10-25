@@ -65,6 +65,10 @@ func Stage(ctx context.Context, dataDir string, bundle Bundle, expectedInstallat
 		_ = os.RemoveAll(stage)
 		return StageResult{}, err
 	}
+	if err := storage.ChownLike(stage, absolute); err != nil {
+		os.RemoveAll(stage)
+		return StageResult{}, err
+	}
 	keep := false
 	defer func() {
 		if !keep {
@@ -150,6 +154,10 @@ func Swap(dataDir, stage string) error {
 	}
 	oldDir := filepath.Join(absolute, restorePrefix+"old-"+token)
 	if err := os.Mkdir(oldDir, 0o700); err != nil {
+		return err
+	}
+	if err := storage.ChownLike(oldDir, absolute); err != nil {
+		os.Remove(oldDir)
 		return err
 	}
 	j := restoreJournal{Version: 1, DataDir: absolute, StageDir: stage, OldDir: oldDir, State: "started"}
@@ -326,6 +334,10 @@ func writeJournal(path string, journal restoreJournal) error {
 	if err != nil {
 		return err
 	}
+	if err := storage.ChownLike(temporary, filepath.Dir(path)); err != nil {
+		file.Close()
+		return err
+	}
 	if _, err := file.Write(contents); err != nil {
 		_ = file.Close()
 		_ = os.Remove(temporary)
@@ -349,6 +361,10 @@ func writeJournal(path string, journal restoreJournal) error {
 func writePrivateFile(path string, contents []byte) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := storage.ChownLike(path, filepath.Dir(path)); err != nil {
+		file.Close()
 		return err
 	}
 	if _, err := file.Write(contents); err != nil {

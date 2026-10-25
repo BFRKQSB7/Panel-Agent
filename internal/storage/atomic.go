@@ -13,10 +13,12 @@ import (
 // WritePrivateAtomic persists one private file, including the parent-directory
 // rename on Linux. The caller owns serialization of the surrounding state.
 func WritePrivateAtomic(path string, contents []byte) error {
+	ownerSource := filepath.Dir(path)
 	if info, err := os.Lstat(path); err == nil {
 		if !info.Mode().IsRegular() {
 			return errors.New("private file must be regular")
 		}
+		ownerSource = path
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -30,6 +32,10 @@ func WritePrivateAtomic(path string, contents []byte) error {
 		return err
 	}
 	defer os.Remove(temporary)
+	if err := ChownLike(temporary, ownerSource); err != nil {
+		file.Close()
+		return err
+	}
 	if _, err := file.Write(contents); err != nil {
 		_ = file.Close()
 		return err

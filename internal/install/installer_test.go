@@ -38,7 +38,7 @@ func TestInstallIsIdempotentAndUninstallHasTwoLevels(t *testing.T) {
 		t.Fatalf("idempotent install failed: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(project, "bin", "control"), filepath.Join(project, "bin", "control-agent"), filepath.Join(project, "bin", "xray"),
+		filepath.Join(project, "bin", "control"), filepath.Join(project, "bin", "control-agent"), RuntimeCorePath(options),
 		filepath.Join(units, "panel-agent-control.service"), filepath.Join(units, "panel-agent-agent.service"),
 		filepath.Join(data, "control", "ownership.json"), filepath.Join(data, "agent", "ownership.json"),
 	} {
@@ -46,7 +46,7 @@ func TestInstallIsIdempotentAndUninstallHasTwoLevels(t *testing.T) {
 			t.Fatalf("installed path missing %s: %v", path, err)
 		}
 	}
-	if unit, err := os.ReadFile(filepath.Join(units, "panel-agent-agent.service")); err != nil || !strings.Contains(string(unit), "--xray-path") || !strings.Contains(string(unit), "ProtectSystem=strict") {
+	if unit, err := os.ReadFile(filepath.Join(units, "panel-agent-agent.service")); err != nil || !strings.Contains(string(unit), systemdQuote(RuntimeCorePath(options))) || strings.Contains(string(unit), systemdQuote(xray)) || !strings.Contains(string(unit), "ProtectSystem=strict") {
 		t.Fatalf("agent unit missing ownership boundaries: %v %s", err, unit)
 	}
 	if err := os.WriteFile(filepath.Join(data, "agent", "agent.ledger.sqlite"), []byte("unacked"), 0o600); err != nil {

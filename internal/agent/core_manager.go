@@ -91,6 +91,9 @@ func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*Core
 	if err != nil {
 		return nil, err
 	}
+	if err := storage.RequireOwner(absolute); err != nil {
+		return nil, err
+	}
 	binary, err := filepath.Abs(binaryPath)
 	if err != nil {
 		return nil, err
@@ -112,6 +115,9 @@ func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*Core
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
 			return nil, errors.New("Core 数据目录必须为权限 0700 的真实目录")
 		}
+	}
+	if err := migrateCoreBinaryReference(absolute, dir, binary, developmentLoopback); err != nil {
+		return nil, err
 	}
 	if err := recoverPersistedUpgrade(dir, binary); err != nil {
 		return nil, err

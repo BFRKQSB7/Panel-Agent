@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -237,6 +238,10 @@ func chownServiceRoots(options install.Options) error {
 			return err
 		}
 		paths = append(paths, dataDir)
+		paths = append(paths, dataDir+string(os.PathSeparator)+"ownership.json")
+		if role == install.RoleAgent && options.CoreOwner == install.CoreProject {
+			paths = append(paths, filepath.Dir(install.RuntimeCorePath(options)), install.RuntimeCorePath(options))
+		}
 		paths = append(paths, options.LogRoot+string(os.PathSeparator)+string(role)+".log")
 	}
 	for _, path := range paths {

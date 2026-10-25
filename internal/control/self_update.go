@@ -123,6 +123,9 @@ func updateSelf(ctx context.Context, options SelfUpdateOptions, checkpoint func(
 	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return SelfUpdateResult{}, err
 	}
+	if err := storage.ChownLike(backupDir, dataDir); err != nil {
+		return SelfUpdateResult{}, err
+	}
 	backupToken, err := security.NewToken(16)
 	if err != nil {
 		return SelfUpdateResult{}, err
@@ -161,6 +164,16 @@ func updateSelf(ctx context.Context, options SelfUpdateOptions, checkpoint func(
 		return SelfUpdateResult{}, err
 	}
 	journal := panelSelfUpdateJournal{Version: 1, Executable: executable, Previous: previousPath, Staged: stagedPath, DataStage: preflightDir, OriginalSHA: panelFileDigest(executable), CandidateSHA: options.PackageSHA256}
+	originalInfo, err := os.Lstat(executable)
+	if err != nil {
+		return SelfUpdateResult{}, err
+	}
+	if err := storage.ChownLike(stagedPath, executable); err != nil {
+		return SelfUpdateResult{}, err
+	}
+	if err := os.Chmod(stagedPath, originalInfo.Mode().Perm()); err != nil {
+		return SelfUpdateResult{}, err
+	}
 	if !security.IsValidDigest(journal.OriginalSHA) {
 		os.Remove(stagedPath)
 		return SelfUpdateResult{}, errors.New("无法验证原 Panel 程序")
@@ -174,6 +187,12 @@ func updateSelf(ctx context.Context, options SelfUpdateOptions, checkpoint func(
 		if err := copyPrivateFile(previousPath, original); err != nil {
 			os.Remove(stagedPath)
 			os.Remove(previousPath)
+			return SelfUpdateResult{}, err
+		}
+		if err := storage.ChownLike(previousPath, executable); err != nil {
+			return SelfUpdateResult{}, err
+		}
+		if err := os.Chmod(previousPath, originalInfo.Mode().Perm()); err != nil {
 			return SelfUpdateResult{}, err
 		}
 	}
@@ -287,6 +306,10 @@ func copyPrivateFile(path string, contents []byte) error {
 func writePrivateFile(path string, contents []byte) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := storage.ChownLike(path, filepath.Dir(path)); err != nil {
+		file.Close()
 		return err
 	}
 	if _, err := file.Write(contents); err != nil {

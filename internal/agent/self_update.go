@@ -176,6 +176,12 @@ func updateProgram(ctx context.Context, dataDir, executable, packagePath, versio
 		}
 	}()
 	j := agentProgramJournal{Executable: executable, Staged: staged, OriginalSHA: candidateDigest(executable), CandidateSHA: strings.ToLower(digest)}
+	if err := storage.ChownLike(staged, executable); err != nil {
+		return err
+	}
+	if err := os.Chmod(staged, info.Mode().Perm()); err != nil {
+		return err
+	}
 	if candidateDigest(staged) != j.CandidateSHA || !security.IsValidDigest(j.OriginalSHA) {
 		return errors.New("Agent 暂存程序校验失败")
 	}
@@ -193,6 +199,12 @@ func updateProgram(ctx context.Context, dataDir, executable, packagePath, versio
 	if candidateDigest(previous) != j.OriginalSHA {
 		os.Remove(previous)
 		return errors.New("Agent 回滚程序校验失败")
+	}
+	if err := storage.ChownLike(previous, executable); err != nil {
+		return err
+	}
+	if err := os.Chmod(previous, info.Mode().Perm()); err != nil {
+		return err
 	}
 	if err := write(); err != nil {
 		os.Remove(previous)

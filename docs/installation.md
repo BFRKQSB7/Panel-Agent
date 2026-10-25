@@ -11,6 +11,8 @@ PANEL_AGENT_XRAY=/path/to/verified/xray ./scripts/build-linux.sh dist amd64
 sudo ./scripts/install.sh ./dist --role panel-agent
 ```
 
+Windows 上可用 `scripts/package-linux.ps1` 生成包含官方 Xray、安装入口、许可证、来源清单和 SHA256SUMS 的双架构本地候选包，命令见根 README。该脚本需要 PowerShell 7、Go 1.27.1 与 WSL Debian；输出目录必须不存在。`.tar.gz` 内程序与 shell 入口使用 Linux 可执行权限，解压后执行 `sudo sh ./install.sh . --role panel-agent`。`manifest.json` 的候选状态不等于发布验收通过，正式状态以任务索引为准。
+
 `scripts/install.sh` 先在发布目录执行 `sha256sum -c SHA256SUMS`，校验不通过就不会调用安装器。`--role control` 只安装 Panel，`--role agent` 只安装 Agent，`--role panel-agent` 安装两者；安装创建 `/opt/panel-agent`、`/var/lib/panel-agent/{control,agent}`、`/var/log/panel-agent` 和项目专用 systemd unit。默认只执行 `systemctl enable`，因为 Agent 必须先完成配对；管理员初始化 Panel 后可分别启动：
 
 ```sh

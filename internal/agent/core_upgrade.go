@@ -183,6 +183,51 @@ func sameCorePath(left, right string) bool {
 	return filepath.Clean(left) == filepath.Clean(right)
 }
 
+// Older installers pointed the service at the release source. A re-install
+// records that exact old path; migrate only a validated, stopped Core journal.
+func migrateCoreBinaryReference(dataDir, dir, binary string, developmentLoopback bool) error {
+	contents, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var state coreJournal
+	if len(contents) > 4<<20 || json.Unmarshal(contents, &state) != nil {
+		return errors.New("Core journal is invalid during path migration")
+	}
+	if state.Binary == binary {
+		return nil
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(dataDir, "ownership.json"))
+	if err != nil {
+		return err
+	}
+	var manifest install.Manifest
+	if len(manifestBytes) > install.MaxManifestBytes || json.Unmarshal(manifestBytes, &manifest) != nil || manifest.Core.Owner != install.CoreProject || manifest.Core.Path != binary || manifest.Core.PreviousPath == "" || manifest.Core.PreviousPath != state.Binary {
+		return errors.New("Core binary path migration is not authorized by ownership")
+	}
+	legacy := &CoreManager{dir: dir, binary: state.Binary, developmentLoopback: developmentLoopback}
+	if err := legacy.load(); err != nil {
+		return err
+	}
+	if state.Process != nil {
+		if _, err := os.Stat(filepath.Join("/proc", fmt.Sprint(state.Process.PID))); err == nil || !errors.Is(err, os.ErrNotExist) {
+			return errors.New("请先停止旧 Agent/Core，再迁移受管 Core 路径")
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, coreUpgradeJournalName)); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return errors.New("Core 路径迁移前必须恢复未完成的升级")
+	}
+	state.Binary = binary
+	updated, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return storage.WritePrivateAtomic(filepath.Join(dir, "state.json"), updated)
+}
+
 func (m *CoreManager) CurrentVersion() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
