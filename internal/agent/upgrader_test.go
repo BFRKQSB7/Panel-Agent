@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,6 +61,25 @@ func TestExtractConfiguredOfficialPackage(t *testing.T) {
 	candidate, err := extractCoreBinary(contents)
 	if err != nil || len(candidate) == 0 {
 		t.Fatalf("official release extraction failed: %v", err)
+	}
+}
+
+func TestStageUpgradePackageRejectsTamperedCandidate(t *testing.T) {
+	dir := t.TempDir()
+	client := &Client{core: &CoreManager{dir: dir}}
+	intentID := "11111111-1111-4111-8111-111111111111"
+	contents := []byte("candidate")
+	digest := hex.EncodeToString(packageDigest(contents))
+
+	candidatePath, err := client.stageUpgradePackage(intentID, contents, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(candidatePath, []byte("tampered"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.stageUpgradePackage(intentID, contents, digest); err == nil {
+		t.Fatal("tampered staged candidate was reused")
 	}
 }
 

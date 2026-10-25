@@ -166,12 +166,6 @@ func (c *Client) stageUpgradePackage(intentID string, contents []byte, expectedP
 	if err := writeUpgradeFile(packagePath, contents, expectedPackageSHA, 0o600); err != nil {
 		return "", err
 	}
-	candidatePath := filepath.Join(stageDir, "xray")
-	if info, err := os.Lstat(candidatePath); err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
-		return candidatePath, nil
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
 	candidate, err := extractCoreBinary(contents)
 	if err != nil {
 		// The local CLI may be given an already extracted executable. Remote
@@ -181,6 +175,22 @@ func (c *Client) stageUpgradePackage(intentID string, contents []byte, expectedP
 	}
 	if len(candidate) == 0 || len(candidate) > protocol.MaxUpgradePackageBytes {
 		return "", errors.New("Core 候选文件大小无效")
+	}
+	candidatePath := filepath.Join(stageDir, "xray")
+	if info, err := os.Lstat(candidatePath); err == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("已有 Core 候选路径不安全")
+		}
+		stored, readErr := os.ReadFile(candidatePath)
+		if readErr != nil {
+			return "", readErr
+		}
+		if !bytes.Equal(stored, candidate) {
+			return "", errors.New("已有 Core 候选文件校验不匹配")
+		}
+		return candidatePath, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
 	if err := storage.WritePrivateAtomic(candidatePath, candidate); err != nil {
 		return "", err
