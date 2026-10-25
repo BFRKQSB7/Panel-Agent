@@ -34,6 +34,11 @@ func acquireNamedLock(dataDir, name, conflictMessage string) (*ProcessLock, erro
 		_ = file.Close()
 		return nil, fmt.Errorf("acquire process lock (%s): %w", conflictMessage, err)
 	}
+	if err := ChownLike(path, dataDir); err != nil {
+		_ = unlockFile(file)
+		_ = file.Close()
+		return nil, fmt.Errorf("preserve process lock ownership: %w", err)
+	}
 	return &ProcessLock{file: file}, nil
 }
 
