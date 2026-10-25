@@ -99,6 +99,7 @@ function Write-RunLog([string]$Name, [string]$Text) {
 
 function SshArguments([hashtable]$Side) {
     return @(
+        '-n',
         '-F', 'NUL',
         '-i', $Side.Key,
         '-o', 'IdentitiesOnly=yes',
@@ -106,6 +107,8 @@ function SshArguments([hashtable]$Side) {
         '-o', "UserKnownHostsFile=$($Side.KnownHosts)",
         '-o', 'GlobalKnownHostsFile=none',
         '-o', 'ConnectTimeout=15',
+        '-o', 'ServerAliveInterval=5',
+        '-o', 'ServerAliveCountMax=2',
         '-p', [string]$Side.Port
     )
 }
@@ -324,7 +327,7 @@ function Assert-Samples([hashtable]$Side, [string]$Name) {
         throw "$Name 没有双向真实流量：$($sample | ConvertTo-Json -Compress)"
     }
     $expected = if ($Side.Name -eq 'phoenix-exit') { 'machine_only_transit' } else { 'user_entry' }
-    $streams = @($sample.ledger.PendingPreview | ForEach-Object { $_.Stream.Kind })
+    $streams = @($sample.ledger.pending_preview | ForEach-Object { $_.stream.kind })
     if ($streams -notcontains $expected) {
         throw "$Name 账本 stream 不是 $expected：$($streams -join ',')"
     }

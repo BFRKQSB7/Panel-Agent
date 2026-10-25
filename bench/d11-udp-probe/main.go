@@ -93,17 +93,47 @@ func run(socksAddress, targetAddress string, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
-	if n < 4 || response[0] != 0 || response[1] != 0 || response[2] != 0 {
-		return errors.New("invalid SOCKS5 UDP response header")
+	payload, err := socks5UDPPayload(response[:n])
+	if err != nil {
+		return err
 	}
-	payload := response[4:n]
-	if len(payload) < 12 || binary.BigEndian.Uint16(payload[:2]) != queryID || payload[2]&0x80 == 0 {
-		return errors.New("invalid DNS response")
+	if len(payload) < 12 {
+		return fmt.Errorf("invalid DNS response: length=%d", len(payload))
+	}
+	responseID := binary.BigEndian.Uint16(payload[:2])
+	flags := binary.BigEndian.Uint16(payload[2:4])
+	if responseID != queryID || flags&0x8000 == 0 {
+		return fmt.Errorf("invalid DNS response: id=%04x want=%04x flags=%04x length=%d", responseID, queryID, flags, len(payload))
 	}
 	if payload[3]&0x0f != 0 {
 		return fmt.Errorf("DNS response code %d", payload[3]&0x0f)
 	}
 	return nil
+}
+
+func socks5UDPPayload(packet []byte) ([]byte, error) {
+	if len(packet) < 4 || packet[0] != 0 || packet[1] != 0 || packet[2] != 0 {
+		return nil, errors.New("invalid SOCKS5 UDP response header")
+	}
+	offset := 4
+	switch packet[3] {
+	case 1:
+		offset += net.IPv4len
+	case 4:
+		offset += net.IPv6len
+	case 3:
+		if len(packet) <= offset {
+			return nil, errors.New("truncated SOCKS5 UDP domain header")
+		}
+		offset += 1 + int(packet[offset])
+	default:
+		return nil, errors.New("unknown SOCKS5 UDP address type")
+	}
+	offset += 2
+	if len(packet) < offset {
+		return nil, errors.New("truncated SOCKS5 UDP response header")
+	}
+	return packet[offset:], nil
 }
 
 func readAssociateReply(r io.Reader) (*net.UDPAddr, error) {
