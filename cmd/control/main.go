@@ -30,7 +30,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control admin init | control serve | control update | control version | control cleanup")
+		return errors.New("用法：control admin init | control serve | control check | control update | control version | control cleanup")
 	}
 	switch args[0] {
 	case "admin":
@@ -40,6 +40,8 @@ func run(args []string) error {
 		return runAdminInit(args[2:])
 	case "serve":
 		return runServe(args[1:])
+	case "check":
+		return runCheck(args[1:])
 	case "update":
 		return runUpdate(args[1:])
 	case "version":
@@ -51,8 +53,25 @@ func run(args []string) error {
 	case "cleanup":
 		return runCleanup(args[1:])
 	default:
-		return errors.New("用法：control admin init | control serve | control update | control version | control cleanup")
+		return errors.New("用法：control admin init | control serve | control check | control update | control version | control cleanup")
 	}
+}
+
+func runCheck(args []string) error {
+	flags := flag.NewFlagSet("check", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dataDir := flags.String("data-dir", defaultDataDir(), "Panel data directory")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return errors.New("用法：control check [--data-dir PATH]")
+	}
+	server, err := control.NewServer(control.Config{DataDir: *dataDir, Listen: "127.0.0.1:0"})
+	if err != nil {
+		return err
+	}
+	if err := server.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func runUpdate(args []string) error {
@@ -87,7 +106,11 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "Panel 已更新到 %s；完整备份：%s\n", result.Version, result.BackupPath)
+	if result.RollbackPath != "" {
+		fmt.Fprintf(os.Stdout, "Panel 已更新到 %s；完整备份：%s；旧版本仍保留在 %s，下一次更新前会尝试清理。\n", result.Version, result.BackupPath, result.RollbackPath)
+	} else {
+		fmt.Fprintf(os.Stdout, "Panel 已更新到 %s；完整备份：%s\n", result.Version, result.BackupPath)
+	}
 	return nil
 }
 

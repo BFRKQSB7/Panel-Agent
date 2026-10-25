@@ -31,8 +31,9 @@ type SelfUpdateOptions struct {
 }
 
 type SelfUpdateResult struct {
-	BackupPath string
-	Version    string
+	BackupPath   string
+	RollbackPath string
+	Version      string
 }
 
 // UpdateSelf performs a deliberately local Panel update. It refuses to run
@@ -106,14 +107,36 @@ func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResul
 	if err := writePrivateFile(backupPath, contents); err != nil {
 		return SelfUpdateResult{}, err
 	}
+	preflightDir, err := stagePanelPreflight(dataDir, snapshot.Database, snapshot.MasterKey)
+	if err != nil {
+		return SelfUpdateResult{}, fmt.Errorf("准备 Panel 迁移预检：%w", err)
+	}
+	preflightDone := false
+	defer func() {
+		if !preflightDone {
+			_ = os.RemoveAll(preflightDir)
+		}
+	}()
+	if err := checkPanelData(ctx, packagePath, preflightDir); err != nil {
+		return SelfUpdateResult{}, err
+	}
+	if err := os.RemoveAll(preflightDir); err != nil {
+		return SelfUpdateResult{}, fmt.Errorf("清理 Panel 迁移预检：%w", err)
+	}
+	preflightDone = true
 	updateToken, err := security.NewToken(16)
 	if err != nil {
 		return SelfUpdateResult{}, err
 	}
 	stagedPath := executable + ".update-" + updateToken
 	previousPath := executable + ".previous"
-	if _, err := os.Lstat(previousPath); err == nil {
-		return SelfUpdateResult{}, errors.New("已有未清理的 Panel rollback 文件，拒绝覆盖")
+	if info, err := os.Lstat(previousPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return SelfUpdateResult{}, errors.New("已有不安全的 Panel rollback 路径，拒绝覆盖")
+		}
+		if err := os.Remove(previousPath); err != nil {
+			return SelfUpdateResult{}, fmt.Errorf("已有 Panel rollback 文件仍未释放：%w", err)
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return SelfUpdateResult{}, err
 	}
@@ -137,10 +160,14 @@ func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResul
 		}
 		return SelfUpdateResult{}, fmt.Errorf("候选 Panel 健康检查失败，已回滚：%w", err)
 	}
+	rollbackPath := ""
 	if err := os.Remove(previousPath); err != nil {
-		return SelfUpdateResult{}, fmt.Errorf("清理 Panel 旧版本失败，保留 rollback 文件：%w", err)
+		// Windows keeps the image file of this updater process open even after
+		// its path has been renamed. A healthy candidate is still a successful
+		// update; retain the rollback file for cleanup by the next invocation.
+		rollbackPath = previousPath
 	}
-	return SelfUpdateResult{BackupPath: backupPath, Version: options.TargetVersion}, nil
+	return SelfUpdateResult{BackupPath: backupPath, RollbackPath: rollbackPath, Version: options.TargetVersion}, nil
 }
 
 func checkPanelVersion(ctx context.Context, binary, expected string) error {
@@ -154,6 +181,46 @@ func checkPanelVersion(ctx context.Context, binary, expected string) error {
 		return fmt.Errorf("候选 Panel 版本不匹配：%s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func stagePanelPreflight(dataDir string, database, masterKey []byte) (string, error) {
+	stage, err := os.MkdirTemp(dataDir, ".panel-update-check-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(stage, 0o700); err != nil {
+		_ = os.RemoveAll(stage)
+		return "", err
+	}
+	if err := writePrivateFile(filepath.Join(stage, storage.DatabaseFileName), database); err != nil {
+		_ = os.RemoveAll(stage)
+		return "", err
+	}
+	if err := writePrivateFile(filepath.Join(stage, "master.key"), masterKey); err != nil {
+		_ = os.RemoveAll(stage)
+		return "", err
+	}
+	return stage, nil
+}
+
+func checkPanelData(ctx context.Context, binary, dataDir string) error {
+	checkContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(checkContext, binary, "check", "--data-dir", dataDir).CombinedOutput(); err != nil {
+		return fmt.Errorf("候选 Panel 数据迁移预检失败：%w", sanitizePanelCheckOutput(output))
+	}
+	return nil
+}
+
+func sanitizePanelCheckOutput(output []byte) error {
+	message := strings.TrimSpace(string(output))
+	if len([]byte(message)) > protocol.MaxUpgradeDetailBytes {
+		message = string([]byte(message)[:protocol.MaxUpgradeDetailBytes])
+	}
+	if message == "" {
+		return errors.New("候选 Panel check 返回失败")
+	}
+	return errors.New(message)
 }
 
 func copyPrivateFile(path string, contents []byte) error {

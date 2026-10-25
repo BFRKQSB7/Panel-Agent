@@ -16,7 +16,7 @@ control-agent upgrade --data-dir /var/lib/panel-agent \
   --sha256 <official-zip-sha256>
 ```
 
-Panel 自身使用 `control update` 本机流程。它要求停止正在运行的 Panel 进程，先写 D16 完整备份到数据目录的 `backups/`，校验候选的 SHA-256 和固定 `control version` 输出，再在同一目录原子替换并运行版本健康检查。旧可执行文件只在候选检查通过后删除；Windows 或无法获取 Panel 进程锁时会拒绝切换，不会覆盖正在运行的实例。Agent 读取 D14 ownership manifest 后只允许替换 `owner=project` 的 Core，`owner=external` 会明确拒绝升级。
+Panel 自身使用 `control update` 本机流程。它要求停止正在运行的 Panel 进程，先写 D16 完整备份到数据目录的 `backups/`，校验候选的 SHA-256 和固定 `control version` 输出，再用候选程序的 `control check` 在隔离的 `panel.db`/`master.key` 副本上实际跑迁移、解密和初始化检查，随后才在同一目录原子替换并运行版本健康检查。旧可执行文件只在候选检查通过后删除；Windows 或无法获取 Panel 进程锁时会拒绝切换，不会覆盖正在运行的实例。Windows 更新进程可能暂时占用已重命名的旧版本，因此健康更新成功但清理失败时会保留 `.previous` 并由下一次更新尝试清理。Agent 读取 D14 ownership manifest 后只允许替换 `owner=project` 的 Core，`owner=external` 会明确拒绝升级。
 
 ```sh
 control update --data-dir /var/lib/panel-agent/control \
