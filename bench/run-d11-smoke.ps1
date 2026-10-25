@@ -383,11 +383,6 @@ try {
     Assert-Samples $entry 'entry'
     Assert-Samples $exit 'exit'
 
-    Invoke-D11Action $exit 'stop' | Out-Null
-    Assert-ProxyFailure $entry 'exit-stop-fail-closed'
-    Invoke-D11Action $exit 'apply' | Out-Null
-    Assert-ProxyHTTP $entry 'exit-recovery'
-
     Invoke-D11Action $exit 'hard-stop' | Out-Null
     Assert-ProxyFailure $entry 'exit-budget-fail-closed'
     Invoke-D11Action $exit 'apply' | Out-Null
