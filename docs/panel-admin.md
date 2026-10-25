@@ -75,7 +75,9 @@ $joinToken | .\control-agent.exe pair --panel-url $panelUrl --data-dir C:\panel-
 Linux Agent 使用已验证的 Xray **26.10.21** 可执行文件。以下命令中的路径由管理员提供；此阶段不会下载或安装 Core：
 
 ```sh
-./control-agent run --data-dir /var/lib/panel-agent --xray-path /opt/panel-agent/xray
+sudo -u panel-agent /opt/panel-agent/bin/control-agent run \
+  --data-dir /var/lib/panel-agent/agent \
+  --xray-path /var/lib/panel-agent/agent/runtime/xray
 # 自签证书时追加 --ca-cert /path/to/panel-ca.pem
 ```
 

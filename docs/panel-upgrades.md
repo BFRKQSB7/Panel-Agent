@@ -6,20 +6,22 @@ Agent 先检查可用磁盘，再下载到 `agent-data/core/upgrades/<intent-id>
 
 下载、版本、配置或健康失败会回报明确结果；在已经切换候选的情况下，Agent 恢复旧二进制和旧配置并再次健康检查。回滚自身失败时保留升级 journal 和现场，状态不会伪装为成功，下一次 Agent 启动会按 journal 选择安全恢复路径。重复拉取同一 Intent 会继续 `running` 状态，不重复创建另一项任务；重复终态回报幂等处理。
 
-Agent 本机可用明确的 CLI 包执行同一受控切换：
+Agent 本机可用明确的 CLI 包执行同一受控切换。先停止 Agent 服务，再以 `panel-agent` 服务账户运行；项目所有的 Core 实际位于 Agent 数据目录的 runtime 路径，不要把发布目录或 `/opt/panel-agent/bin` 当作运行中的 Core：
 
 ```sh
-control-agent upgrade --data-dir /var/lib/panel-agent \
-  --xray-path /opt/panel-agent/bin/xray \
+sudo systemctl stop panel-agent-agent
+sudo -u panel-agent /opt/panel-agent/bin/control-agent upgrade \
+  --data-dir /var/lib/panel-agent/agent \
+  --xray-path /var/lib/panel-agent/agent/runtime/xray \
   --package /tmp/Xray-linux-64.zip \
-  --target-version 26.10.22 \
+  --target-version 26.10.21 \
   --sha256 <official-zip-sha256>
 ```
 
 Panel 自身使用 `control update` 本机流程。它要求停止正在运行的 Panel 进程，先写入并重新解密验证 D16 完整备份，再用候选程序的 `control check` 在隔离的数据库、主密钥与扩展代上实际跑迁移和初始化检查。检查通过后一起提交候选程序和已迁移的数据代；迁移失败或切换后的健康失败会恢复完整旧代。`.panel-self-update.json` 与 D16 journal 共同记录提交决定，中断发生在提交前时，下次启动恢复匹配的旧程序与旧数据，并要求重新启动；提交后中断则保留新代并补完清理。回滚缺少匹配原程序或校验失败时保留现场并报错。Windows 更新进程可能暂时占用 `.previous`，健康更新后保留它并由后续启动重试清理。Agent 读取 D14 ownership manifest 后只允许替换 `owner=project` 的 Core，`owner=external` 会明确拒绝升级。
 
 ```sh
-control update --data-dir /var/lib/panel-agent/control \
+sudo /opt/panel-agent/bin/control update --data-dir /var/lib/panel-agent/control \
   --package /tmp/control \
   --target-version 0.2.0 \
   --sha256 <panel-binary-sha256> \
@@ -28,7 +30,7 @@ control update --data-dir /var/lib/panel-agent/control \
 
 更新流程不承诺未验证的 Xray 新能力自动兼容。当前配置测试、Stats/监听健康、固定扩展 renderer 和 Transit 配置是最低门槛；真实公网握手、NAT、双机链路和 128MiB 峰值仍需在相应发布矩阵中单独验收。
 
-Agent 程序自身用 `control-agent update --data-dir /var/lib/panel-agent/agent --package /tmp/control-agent --target-version 0.1.0 --sha256 <agent-binary-sha256>` 更新；与更新 Xray 的 `upgrade` 是两个命令。先停止 Agent 服务，再执行本机命令；运行中的 Agent 持有 `agent.lock` 时会拒绝更新。安装清单存在时只更新该安装所拥有的 Agent 二进制。候选必须通过精确的 `version` 和只读的 `check --data-dir`，V1 仅支持不迁移身份/账本格式的兼容更新。程序以同目录原子替换，`agent.program-update.json` 保留中断恢复决定；检查失败恢复原程序，Core、身份文件、账本 epoch 与未 ACK 段不被更新器重建。恢复回滚后重新启动 Agent；新进程按运行程序版本上报版本号。
+Agent 程序自身用 `sudo /opt/panel-agent/bin/control-agent update --data-dir /var/lib/panel-agent/agent --package /tmp/control-agent --target-version 0.1.0 --sha256 <agent-binary-sha256>` 更新；与更新 Xray 的 `upgrade` 是两个命令。先停止 Agent 服务，再执行本机命令；运行中的 Agent 持有 `agent.lock` 时会拒绝更新。安装清单存在时只更新该安装所拥有的 Agent 二进制。候选必须通过精确的 `version` 和只读的 `check --data-dir`，V1 仅支持不迁移身份/账本格式的兼容更新。程序以同目录原子替换，`agent.program-update.json` 保留中断恢复决定；检查失败恢复原程序，Core、身份文件、账本 epoch 与未 ACK 段不被更新器重建。恢复回滚后重新启动 Agent；新进程按运行程序版本上报版本号。
 
 升级包暂存使用流式解压和文件 SHA-256，磁盘预检包含 ZIP、最大候选大小及回滚余量。128MiB 机器的验收使用 `GOMEMLIMIT=32MiB GOGC=50`，须同时记录整机内存、swap、OOM 前后计数与磁盘最小余量；Go 的软目标本身不构成资源通过证据。
 
