@@ -18,6 +18,7 @@ import (
 	"panel-agent.local/panel-agent/internal/agent"
 	"panel-agent.local/panel-agent/internal/agent/ledger"
 	"panel-agent.local/panel-agent/internal/install"
+	"panel-agent.local/panel-agent/internal/protocol"
 	"panel-agent.local/panel-agent/internal/security"
 )
 
@@ -30,9 +31,36 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | upgrade | cleanup")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | upgrade | update | check | version | cleanup")
 	}
 	switch args[0] {
+	case "version":
+		if len(args) != 1 {
+			return errors.New("用法：control-agent version")
+		}
+		fmt.Fprintf(os.Stdout, "Control-Agent %s\n", protocol.AgentVersion)
+		return nil
+	case "check":
+		flags := flag.NewFlagSet("check", flag.ContinueOnError)
+		dir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+			return errors.New("用法：control-agent check [--data-dir PATH]")
+		}
+		return agent.CheckProgramData(context.Background(), *dir)
+	case "update":
+		flags := flag.NewFlagSet("update", flag.ContinueOnError)
+		dir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
+		candidate := flags.String("package", "", "local Agent executable")
+		version := flags.String("target-version", "", "target Agent version")
+		digest := flags.String("sha256", "", "Agent SHA-256")
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *candidate == "" || *version == "" || *digest == "" {
+			return errors.New("用法：control-agent update --package PATH --target-version VERSION --sha256 SHA256 [--data-dir PATH]")
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return agent.UpdateProgram(context.Background(), *dir, executable, *candidate, *version, *digest)
 	case "pair":
 		return runPair(args[1:], false)
 	case "re-pair":
@@ -57,7 +85,7 @@ func run(args []string) error {
 	case "cleanup":
 		return runCleanup(args[1:])
 	default:
-		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | upgrade | cleanup")
+		return errors.New("用法：control-agent pair | re-pair | sync | run | ledger | upgrade | update | check | version | cleanup")
 	}
 }
 

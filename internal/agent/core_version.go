@@ -10,7 +10,9 @@ import (
 	"strings"
 )
 
-const minimumSupportedCoreVersion = "26.10.21"
+// Only package tests override this to exercise historical official upgrades.
+// No runtime option can lower the production compatibility floor.
+var minimumSupportedCoreVersion = "26.10.21"
 
 var xrayVersionPattern = regexp.MustCompile(`(?m)^Xray ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)`)
 var coreVersionValuePattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)

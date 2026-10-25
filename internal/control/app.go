@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,18 @@ func NewServer(config Config) (*Server, error) {
 	processLock, err := storage.AcquireProcessLock(dataDir)
 	if err != nil {
 		return nil, err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		_ = processLock.Close()
+		return nil, err
+	}
+	if rolledBack, err := recoverPanelSelfUpdate(dataDir, executable); err != nil {
+		_ = processLock.Close()
+		return nil, fmt.Errorf("recover Panel update: %w", err)
+	} else if rolledBack {
+		_ = processLock.Close()
+		return nil, errors.New("中断的 Panel 更新已回滚，请重新启动 Panel")
 	}
 	if err := backup.RecoverPending(dataDir); err != nil {
 		_ = processLock.Close()

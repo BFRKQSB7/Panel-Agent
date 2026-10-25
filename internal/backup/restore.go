@@ -191,6 +191,10 @@ func Commit(dataDir string) error {
 	if err != nil {
 		return err
 	}
+	if j.State == "committed" {
+		_ = cleanupCommitted(journalPath, j)
+		return nil
+	}
 	if j.State != "new_moved" {
 		return errors.New("restore is not ready to commit")
 	}

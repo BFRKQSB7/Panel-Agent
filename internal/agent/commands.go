@@ -157,6 +157,18 @@ func LoadClient(dataDir, caCertPath string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		processLock.Close()
+		return nil, err
+	}
+	if rolledBack, e := recoverAgentProgram(store.dataDir, executable); e != nil {
+		processLock.Close()
+		return nil, e
+	} else if rolledBack {
+		processLock.Close()
+		return nil, errors.New("Agent 更新已回滚，请重新启动 Agent")
+	}
 	identity, err := store.Load()
 	if err != nil {
 		_ = processLock.Close()

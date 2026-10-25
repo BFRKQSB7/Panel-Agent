@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -260,6 +258,9 @@ func (m *CoreManager) UpgradeBinary(ctx context.Context, intentID, targetVersion
 	if err := writeCoreUpgradeJournal(journalPath, journal); err != nil {
 		return CoreUpgradeOutcome{}, err
 	}
+	if m.upgradeCheckpoint != nil {
+		m.upgradeCheckpoint("prepared")
+	}
 	clearJournal := false
 	defer func() {
 		if clearJournal {
@@ -278,6 +279,9 @@ func (m *CoreManager) UpgradeBinary(ctx context.Context, intentID, targetVersion
 	if err := writeCoreUpgradeJournal(journalPath, journal); err != nil {
 		return m.rollbackBinaryUpgrade(ctx, journal, journalPath, protocol.UpgradeErrorRollback, err)
 	}
+	if m.upgradeCheckpoint != nil {
+		m.upgradeCheckpoint("stopped")
+	}
 	if err := os.Rename(m.binary, backupPath); err != nil {
 		return m.rollbackBinaryUpgrade(ctx, journal, journalPath, protocol.UpgradeErrorRollback, err)
 	}
@@ -288,6 +292,9 @@ func (m *CoreManager) UpgradeBinary(ctx context.Context, intentID, targetVersion
 	journal.Phase = "swapped"
 	if err := writeCoreUpgradeJournal(journalPath, journal); err != nil {
 		return m.rollbackBinaryUpgrade(ctx, journal, journalPath, protocol.UpgradeErrorRollback, err)
+	}
+	if m.upgradeCheckpoint != nil {
+		m.upgradeCheckpoint("swapped")
 	}
 	m.binaryVersion = candidateVersion
 	process, err := m.start(ctx, record, "starting")
@@ -403,12 +410,7 @@ func validateUpgradeCandidate(root, path, expected string) error {
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > protocol.MaxUpgradePackageBytes {
 		return errors.New("upgrade candidate is not a bounded regular file")
 	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	digest := sha256.Sum256(contents)
-	if !strings.EqualFold(hex.EncodeToString(digest[:]), expected) {
+	if !strings.EqualFold(candidateDigest(path), expected) {
 		return errors.New("upgrade candidate checksum mismatch")
 	}
 	return nil

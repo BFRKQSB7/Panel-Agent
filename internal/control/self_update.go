@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -41,6 +42,11 @@ type SelfUpdateResult struct {
 // candidate through the fixed version subcommand, and keeps a same-directory
 // rollback copy until the candidate passes that health check.
 func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResult, error) {
+	return updateSelf(ctx, options, nil)
+}
+
+// checkpoint is used only by subprocess crash tests, never by a CLI option.
+func updateSelf(ctx context.Context, options SelfUpdateOptions, checkpoint func(string)) (result SelfUpdateResult, err error) {
 	if !panelVersionPattern.MatchString(options.TargetVersion) || !security.IsValidDigest(options.PackageSHA256) || strings.TrimSpace(options.PackagePath) == "" {
 		return SelfUpdateResult{}, errors.New("Panel 更新参数无效")
 	}
@@ -72,7 +78,20 @@ func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResul
 	if !strings.EqualFold(hex.EncodeToString(digest[:]), options.PackageSHA256) {
 		return SelfUpdateResult{}, errors.New("Panel 候选文件 SHA-256 不匹配")
 	}
-	if err := checkPanelVersion(ctx, packagePath, options.TargetVersion); err != nil {
+	updateToken, err := security.NewToken(16)
+	if err != nil {
+		return SelfUpdateResult{}, err
+	}
+	stagedPath := executable + ".update-" + updateToken
+	if err := copyPrivateFile(stagedPath, packageBytes); err != nil {
+		return SelfUpdateResult{}, err
+	}
+	defer func() {
+		if _, e := os.Lstat(filepath.Join(dataDir, panelSelfUpdateJournalName)); errors.Is(e, os.ErrNotExist) {
+			os.Remove(stagedPath)
+		}
+	}()
+	if err := checkPanelVersion(ctx, stagedPath, options.TargetVersion); err != nil {
 		return SelfUpdateResult{}, err
 	}
 	lock, err := storage.AcquireProcessLock(dataDir)
@@ -80,6 +99,11 @@ func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResul
 		return SelfUpdateResult{}, err
 	}
 	defer lock.Close()
+	if rolledBack, err := recoverPanelSelfUpdate(dataDir, executable); err != nil {
+		return SelfUpdateResult{}, err
+	} else if rolledBack {
+		return SelfUpdateResult{}, errors.New("中断的 Panel 更新已回滚，请重新启动更新命令")
+	}
 	store, err := storage.Open(dataDir)
 	if err != nil {
 		return SelfUpdateResult{}, err
@@ -107,28 +131,24 @@ func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResul
 	if err := writePrivateFile(backupPath, contents); err != nil {
 		return SelfUpdateResult{}, err
 	}
-	preflightDir, err := stagePanelPreflight(dataDir, snapshot.Database, snapshot.MasterKey)
+	verified, err := backup.Open(contents, options.BackupPassword)
+	if err != nil {
+		return SelfUpdateResult{}, fmt.Errorf("验证 Panel 更新前备份：%w", err)
+	}
+	preflight, err := backup.Stage(ctx, dataDir, verified, snapshot.InstallationID)
 	if err != nil {
 		return SelfUpdateResult{}, fmt.Errorf("准备 Panel 迁移预检：%w", err)
 	}
-	preflightDone := false
+	preflightDir := preflight.Path
 	defer func() {
-		if !preflightDone {
+		// A failed recovery needs its full staged generation on the next start.
+		if _, e := os.Lstat(filepath.Join(dataDir, panelSelfUpdateJournalName)); errors.Is(e, os.ErrNotExist) {
 			_ = os.RemoveAll(preflightDir)
 		}
 	}()
-	if err := checkPanelData(ctx, packagePath, preflightDir); err != nil {
+	if err := checkPanelData(ctx, stagedPath, preflightDir); err != nil {
 		return SelfUpdateResult{}, err
 	}
-	if err := os.RemoveAll(preflightDir); err != nil {
-		return SelfUpdateResult{}, fmt.Errorf("清理 Panel 迁移预检：%w", err)
-	}
-	preflightDone = true
-	updateToken, err := security.NewToken(16)
-	if err != nil {
-		return SelfUpdateResult{}, err
-	}
-	stagedPath := executable + ".update-" + updateToken
 	previousPath := executable + ".previous"
 	if info, err := os.Lstat(previousPath); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
@@ -140,31 +160,70 @@ func UpdateSelf(ctx context.Context, options SelfUpdateOptions) (SelfUpdateResul
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return SelfUpdateResult{}, err
 	}
-	if err := copyPrivateFile(stagedPath, packageBytes); err != nil {
+	journal := panelSelfUpdateJournal{Version: 1, Executable: executable, Previous: previousPath, Staged: stagedPath, DataStage: preflightDir, OriginalSHA: panelFileDigest(executable), CandidateSHA: options.PackageSHA256}
+	if !security.IsValidDigest(journal.OriginalSHA) {
+		os.Remove(stagedPath)
+		return SelfUpdateResult{}, errors.New("无法验证原 Panel 程序")
+	}
+	if runtime.GOOS != "windows" {
+		original, readErr := os.ReadFile(executable)
+		if readErr != nil {
+			os.Remove(stagedPath)
+			return SelfUpdateResult{}, readErr
+		}
+		if err := copyPrivateFile(previousPath, original); err != nil {
+			os.Remove(stagedPath)
+			os.Remove(previousPath)
+			return SelfUpdateResult{}, err
+		}
+	}
+	if err := writePanelSelfUpdateJournal(dataDir, journal); err != nil {
+		os.Remove(stagedPath)
+		if runtime.GOOS != "windows" {
+			os.Remove(previousPath)
+		}
 		return SelfUpdateResult{}, err
 	}
-	if err := os.Rename(executable, previousPath); err != nil {
-		_ = os.Remove(stagedPath)
-		return SelfUpdateResult{}, fmt.Errorf("切换 Panel 旧版本：%w", err)
+	defer func() {
+		if err != nil {
+			_, recoveryErr := recoverPanelSelfUpdate(dataDir, executable)
+			err = errors.Join(err, recoveryErr)
+		}
+	}()
+	if runtime.GOOS == "windows" {
+		if err := os.Rename(executable, previousPath); err != nil {
+			return SelfUpdateResult{}, fmt.Errorf("切换 Panel 旧版本：%w", err)
+		}
 	}
 	if err := os.Rename(stagedPath, executable); err != nil {
-		_ = os.Remove(stagedPath)
-		if rollbackErr := rollbackPanelExecutable(executable, previousPath); rollbackErr != nil {
-			return SelfUpdateResult{}, fmt.Errorf("切换 Panel 候选版本且回滚失败：%w", errors.Join(err, rollbackErr))
-		}
-		return SelfUpdateResult{}, fmt.Errorf("切换 Panel 候选版本失败，已回滚：%w", err)
+		return SelfUpdateResult{}, fmt.Errorf("切换 Panel 候选版本失败：%w", err)
+	}
+	if checkpoint != nil {
+		checkpoint("binary-swapped")
+	}
+	// Publish the already migrated, verified generation together with the
+	// candidate binary. D16 retains the entire old DB/key/extension generation.
+	if err := backup.Swap(dataDir, preflightDir); err != nil {
+		return SelfUpdateResult{}, fmt.Errorf("切换 Panel 数据代失败：%w", err)
+	}
+	if checkpoint != nil {
+		checkpoint("data-swapped")
 	}
 	if err := checkPanelVersion(ctx, executable, options.TargetVersion); err != nil {
-		if rollbackErr := rollbackPanelExecutable(executable, previousPath); rollbackErr != nil {
-			return SelfUpdateResult{}, fmt.Errorf("候选 Panel 健康检查失败且回滚失败：%w", errors.Join(err, rollbackErr))
-		}
-		return SelfUpdateResult{}, fmt.Errorf("候选 Panel 健康检查失败，已回滚：%w", err)
+		return SelfUpdateResult{}, fmt.Errorf("候选 Panel 健康检查失败：%w", err)
+	}
+	journal.Committed = true
+	if err := writePanelSelfUpdateJournal(dataDir, journal); err != nil {
+		return SelfUpdateResult{}, err
+	}
+	if checkpoint != nil {
+		checkpoint("committed")
+	}
+	if _, err := recoverPanelSelfUpdate(dataDir, executable); err != nil {
+		return SelfUpdateResult{}, err
 	}
 	rollbackPath := ""
-	if err := os.Remove(previousPath); err != nil {
-		// Windows keeps the image file of this updater process open even after
-		// its path has been renamed. A healthy candidate is still a successful
-		// update; retain the rollback file for cleanup by the next invocation.
+	if _, err := os.Stat(previousPath); err == nil {
 		rollbackPath = previousPath
 	}
 	return SelfUpdateResult{BackupPath: backupPath, RollbackPath: rollbackPath, Version: options.TargetVersion}, nil
@@ -177,30 +236,10 @@ func checkPanelVersion(ctx context.Context, binary, expected string) error {
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(string(output), "Panel-Agent "+expected) {
+	if strings.TrimSpace(string(output)) != "Panel-Agent "+expected {
 		return fmt.Errorf("候选 Panel 版本不匹配：%s", strings.TrimSpace(string(output)))
 	}
 	return nil
-}
-
-func stagePanelPreflight(dataDir string, database, masterKey []byte) (string, error) {
-	stage, err := os.MkdirTemp(dataDir, ".panel-update-check-")
-	if err != nil {
-		return "", err
-	}
-	if err := os.Chmod(stage, 0o700); err != nil {
-		_ = os.RemoveAll(stage)
-		return "", err
-	}
-	if err := writePrivateFile(filepath.Join(stage, storage.DatabaseFileName), database); err != nil {
-		_ = os.RemoveAll(stage)
-		return "", err
-	}
-	if err := writePrivateFile(filepath.Join(stage, "master.key"), masterKey); err != nil {
-		_ = os.RemoveAll(stage)
-		return "", err
-	}
-	return stage, nil
 }
 
 func checkPanelData(ctx context.Context, binary, dataDir string) error {
@@ -272,8 +311,10 @@ func rollbackPanelExecutable(executable, previousPath string) error {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return errors.New("Panel 候选文件回滚路径不安全")
 		}
-		if err := os.Remove(executable); err != nil {
-			return err
+		if runtime.GOOS == "windows" {
+			if err := os.Remove(executable); err != nil {
+				return err
+			}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err

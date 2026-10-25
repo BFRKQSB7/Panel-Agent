@@ -79,6 +79,8 @@ type CoreManager struct {
 	state               coreJournal
 	developmentLoopback bool
 	ledger              *ledger.Store
+	// Used only by subprocess tests to interrupt durable upgrade phases.
+	upgradeCheckpoint func(string)
 }
 
 func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*CoreManager, error) {

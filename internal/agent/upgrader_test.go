@@ -83,6 +83,34 @@ func TestStageUpgradePackageRejectsTamperedCandidate(t *testing.T) {
 	}
 }
 
+func TestStageUpgradePackageRejectsDuplicateZIPAndWrongPackageDigest(t *testing.T) {
+	var archive bytes.Buffer
+	w := zip.NewWriter(&archive)
+	for i := 0; i < 2; i++ {
+		f, err := w.Create("xray")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write([]byte("candidate")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{core: &CoreManager{dir: t.TempDir()}}
+	intent := "11111111-1111-4111-8111-111111111111"
+	if _, err := client.stageUpgradePackage(intent, archive.Bytes(), hex.EncodeToString(packageDigest(archive.Bytes()))); err == nil {
+		t.Fatal("duplicate executable entries accepted")
+	}
+	if _, err := client.stageUpgradePackage(intent, []byte("candidate"), hex.EncodeToString(packageDigest([]byte("wrong")))); err == nil {
+		t.Fatal("wrong package digest accepted")
+	}
+	if _, err := os.Stat(filepath.Join(client.core.dir, coreUpgradeDirName, intent, "xray")); !os.IsNotExist(err) {
+		t.Fatal("invalid package left an executable candidate", err)
+	}
+}
+
 func TestRecoverPersistedUpgradeKeepsOriginalBeforeSwap(t *testing.T) {
 	dir := t.TempDir()
 	coreDir := filepath.Join(dir, "core")

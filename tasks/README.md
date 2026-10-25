@@ -3,7 +3,7 @@
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
 CURRENT MILESTONE: M5 — 运维与发布
-RECOMMENDED NEXT TASK: [D15 — 手动 Core 升级与 CLI 更新回滚](D15-manual-upgrade-rollback.md)（D11 已完成；先核对是否出现高于 26.10.21 的官方 Xray 包，再继续真实替换/回滚验收）
+RECOMMENDED NEXT TASK: [D17 — 完整发布回归与资源验收](D17-release-resource-gate.md)（D15 的历史官方版本升级、整机资源与 CLI 更新验收已完成，继续最终组合矩阵与本地产物）
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
@@ -23,9 +23,9 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 | [D12 — 动态 NAT/DNS 教程与有限连通性检查](D12-nat-dns-guidance.md) | M4 | DONE | high | D06 | 节点详情动态生成 NAT/DNS/Reality/Agent/Core 引导，复制按钮与 `public/local` 有限 TCP 检查完成；一次 DNS 解析绑定地址，拒绝私网、回环、mapped IPv6 与 DNS 重绑定；Go 全量测试/vet、CSP 回归及真实浏览器剪贴板/API smoke 通过。 |
 | [D13 — 受限协议扩展的完整生命周期](D13-bounded-protocol-extensions.md) | M4 | DONE | high | D06 | 受限 ZIP 声明式包、固定 Trojan/TCP/TLS Xray 与 URI/Mihomo renderer、加密 secret、Node 显式版本引用、启停/删除引用保护、管理页面与规范完成；Xray 26.10.21 `run -test`、浏览器管理 smoke、Go 全量测试/vet、diff check 通过。公网代理握手与证书链未在本项宣称验证。 |
 | [D14 — 安装、文件所有权与两级卸载](D14-install-ownership-cleanup.md) | M5 | DONE | high | D04 | 安装器/角色 CLI、ownership.json、systemd 服务与清理 timer、项目/外置 Core、普通卸载与 purge 完成；Go 全量测试/vet、Linux amd64 编译、diff check、WSL2 Debian systemd 隔离安装→幂等重装→普通卸载→purge、systemd-analyze 与清理日志轮转 smoke 通过。 |
-| [D15 — 手动 Core 升级与 CLI 更新回滚](D15-manual-upgrade-rollback.md) | M5 | PARTIAL | max | D16 | 受控 Upgrade Intent/Result、authority 绑定、幂等拉取、官方源校验/有界解压、Core 同锁 journal 切换/回滚、external Core 拒绝、Agent/Panel CLI 完成；修复同一 Intent 暂存目录已有 `xray` 时未校验候选内容的问题，并新增篡改回归测试。`go test -count=1 -run 'Upgrade|upgrade' ./internal/agent ./internal/control ./internal/protocol`、相关 vet 通过；2026-10-25 重新核对官方 Releases/Packages 仍以 `v26.10.21` 为 Latest，没有高于当前基线的候选，真实更高版本替换、启动失败回滚与 128MiB 峰值继续保持未验证，D17 仍 WAITING。 |
+| [D15 — 手动 Core 升级与 CLI 更新回滚](D15-manual-upgrade-rollback.md) | M5 | DONE | max | D16 | 官方包校验后的 `26.9.30 → 26.10.21` 真实升级、重复请求、启动失败回滚、prepared/stopped/swapped 子进程退出恢复及代理/Stats/未 ACK 账本保留通过；历史版本许可只在测试进程生效，生产最低版本仍为 26.10.21。修复解压/文件校验的内存峰值，补齐下载失败/低盘拒绝、Agent 本机 update/check/version、Panel 已迁移数据代提交和程序/DB/key/扩展联合 journal 恢复；Agent 七场景、Panel 六场景及现有权限/到期真实 Core 回归通过。证据 `.work/d15-20261025T084212199Z/host-final.txt`：授权玩具冰岛 128MiB 整机、既有服务保留，`GOMEMLIMIT=32MiB GOGC=50`，约 62.5 秒升级/故障矩阵，采样峰值 129449984B（123.5MiB）、swap 峰值 6127616B（5.8MiB）、OOM 增量零、最小可用盘 779008KiB；远端临时文件和进程已清理。48MiB tmpfs 低盘拒绝与 WSL 128MiB/no-swap cgroup 另行通过；全量 Go 测试/vet、shell 语法与 diff check 通过。 |
 | [D16 — 一致性备份、恢复与 Agent 重连](D16-backup-restore-reconcile.md) | M5 | DONE | max | D09, D13, D14 | 一致性 `VACUUM INTO` 快照、有界 Argon2id/AES-GCM 备份包、扩展/密钥/安装身份校验、journal 化旧代回滚与启动恢复、维护屏障、authority/会话/Join/操作凭据失效、Agent TLS `SyncOnce` 重连及 receipt 证明的 recovery gap 完成；全量 Go 测试、vet、diff check、并发快照与未提交切换回滚测试通过。 |
-| [D17 — 完整发布回归与资源验收](D17-release-resource-gate.md) | M5 | WAITING | high | D11, D12, D15 | — |
+| [D17 — 完整发布回归与资源验收](D17-release-resource-gate.md) | M5 | READY | high | D11, D12, D15 | 依赖均完成，待执行最终组合矩阵、发行包及正式平台/资源/长稳验收。 |
 
 M1 D01–D04：Core/后台/接入/节点；M2 D05–D06：用户与订阅；M3 D07–D10：周期/账本/入账/配额；M4 D11–D13：一跳/教程/扩展；M5 D14–D17：运维/发布。运维实际顺序为 D14→D16→D15→D17，先验证备份恢复再实现含 Schema 迁移的 Panel 更新，编号不代表依赖顺序。
 

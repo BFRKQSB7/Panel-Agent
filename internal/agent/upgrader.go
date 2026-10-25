@@ -18,7 +18,6 @@ import (
 
 	"panel-agent.local/panel-agent/internal/protocol"
 	"panel-agent.local/panel-agent/internal/security"
-	"panel-agent.local/panel-agent/internal/storage"
 )
 
 const officialXrayReleaseBaseURL = "https://github.com/XTLS/Xray-core/releases/download/v"
@@ -70,6 +69,10 @@ func (c *Client) syncUpgrades(ctx context.Context) error {
 func (c *Client) executeUpgradeIntent(ctx context.Context, intent protocol.UpgradeIntent) (CoreUpgradeOutcome, error) {
 	packagePath, err := c.downloadUpgradePackage(ctx, intent)
 	if err != nil {
+		var typed *CoreUpgradeError
+		if errors.As(err, &typed) {
+			return CoreUpgradeOutcome{}, err
+		}
 		return CoreUpgradeOutcome{}, &CoreUpgradeError{Code: protocol.UpgradeErrorDownload, Err: err}
 	}
 	outcome, upgradeErr := c.core.UpgradeBinary(ctx, intent.ID, intent.TargetVersion, packagePath, candidateDigest(packagePath))
@@ -89,8 +92,8 @@ func (c *Client) downloadUpgradePackage(ctx context.Context, intent protocol.Upg
 		return "", errors.New("升级来源或包大小不受支持")
 	}
 	available, err := availableDiskBytes(c.core.dir)
-	if err != nil || available < intent.PackageSize+coreUpgradeHeadroom {
-		return "", fmt.Errorf("升级前可用磁盘空间不足：%d", available)
+	if err != nil || available < intent.PackageSize+protocol.MaxUpgradePackageBytes+coreUpgradeHeadroom {
+		return "", &CoreUpgradeError{Code: protocol.UpgradeErrorLowDisk, Err: fmt.Errorf("升级前可用磁盘空间不足：%d", available)}
 	}
 	url, err := officialXrayReleaseURL(intent.TargetVersion, runtime.GOARCH)
 	if err != nil {
@@ -112,11 +115,16 @@ func (c *Client) downloadUpgradePackage(ctx context.Context, intent protocol.Upg
 	if response.ContentLength >= 0 && uint64(response.ContentLength) != intent.PackageSize {
 		return "", errors.New("下载包大小与 Intent 不匹配")
 	}
-	contents, err := io.ReadAll(io.LimitReader(response.Body, int64(intent.PackageSize)+1))
+	contents := make([]byte, int(intent.PackageSize))
+	_, err = io.ReadFull(response.Body, contents)
 	if err != nil {
 		return "", err
 	}
-	if uint64(len(contents)) != intent.PackageSize || !bytes.Equal(packageDigest(contents), mustDigest(intent.SHA256)) {
+	var extra [1]byte
+	if n, err := io.ReadFull(response.Body, extra[:]); n != 0 || err != io.EOF {
+		return "", errors.New("下载包大小与 Intent 不匹配")
+	}
+	if !bytes.Equal(packageDigest(contents), mustDigest(intent.SHA256)) {
 		return "", errors.New("下载包校验失败")
 	}
 	return c.stageUpgradePackage(intent.ID, contents, intent.SHA256)
@@ -128,6 +136,10 @@ func (c *Client) UpgradePackage(ctx context.Context, intentID, packagePath, targ
 	if c.core == nil {
 		return CoreUpgradeOutcome{}, &CoreUpgradeError{Code: protocol.UpgradeErrorCoreDisabled, Err: errors.New("受管 Core 尚未启用")}
 	}
+	info, err := os.Lstat(packagePath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > protocol.MaxUpgradePackageBytes {
+		return CoreUpgradeOutcome{}, &CoreUpgradeError{Code: protocol.UpgradeErrorChecksum, Err: errors.New("本地升级包不是有界普通文件")}
+	}
 	contents, err := os.ReadFile(packagePath)
 	if err != nil {
 		return CoreUpgradeOutcome{}, &CoreUpgradeError{Code: protocol.UpgradeErrorDownload, Err: err}
@@ -137,6 +149,10 @@ func (c *Client) UpgradePackage(ctx context.Context, intentID, packagePath, targ
 	}
 	candidate, err := c.stageUpgradePackage(intentID, contents, packageSHA256)
 	if err != nil {
+		var typed *CoreUpgradeError
+		if errors.As(err, &typed) {
+			return CoreUpgradeOutcome{}, err
+		}
 		return CoreUpgradeOutcome{}, &CoreUpgradeError{Code: protocol.UpgradeErrorChecksum, Err: err}
 	}
 	outcome, upgradeErr := c.core.UpgradeBinary(ctx, intentID, targetVersion, candidate, candidateDigest(candidate))
@@ -152,8 +168,15 @@ func (c *Client) UpgradePackage(ctx context.Context, intentID, packagePath, targ
 }
 
 func (c *Client) stageUpgradePackage(intentID string, contents []byte, expectedPackageSHA string) (string, error) {
-	if !security.IsUUIDv4(intentID) || !security.IsValidDigest(expectedPackageSHA) {
+	if !security.IsUUIDv4(intentID) || !security.IsValidDigest(expectedPackageSHA) || !bytes.Equal(packageDigest(contents), mustDigest(expectedPackageSHA)) {
 		return "", errors.New("升级 Intent 或包校验无效")
+	}
+	available, err := availableDiskBytes(c.core.dir)
+	if err == nil && available < uint64(len(contents))+protocol.MaxUpgradePackageBytes+coreUpgradeHeadroom {
+		return "", &CoreUpgradeError{Code: protocol.UpgradeErrorLowDisk, Err: fmt.Errorf("升级暂存空间不足：%d", available)}
+	}
+	if err != nil && managedCoreSupported {
+		return "", err
 	}
 	stageDir := filepath.Join(c.core.dir, coreUpgradeDirName, intentID)
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
@@ -166,36 +189,45 @@ func (c *Client) stageUpgradePackage(intentID string, contents []byte, expectedP
 	if err := writeUpgradeFile(packagePath, contents, expectedPackageSHA, 0o600); err != nil {
 		return "", err
 	}
-	candidate, err := extractCoreBinary(contents)
+	temporary, err := os.CreateTemp(stageDir, ".xray-")
 	if err != nil {
-		// The local CLI may be given an already extracted executable. Remote
-		// official releases are ZIPs and therefore still require bounded
-		// extraction below.
-		candidate = contents
+		return "", err
 	}
-	if len(candidate) == 0 || len(candidate) > protocol.MaxUpgradePackageBytes {
-		return "", errors.New("Core 候选文件大小无效")
+	defer os.Remove(temporary.Name())
+	digest := sha256.New()
+	writer := io.MultiWriter(temporary, digest)
+	// Raw executables are supported by the local CLI; ZIPs must pass every
+	// archive check. Stream the bounded ELF instead of buffering a second copy.
+	if bytes.HasPrefix(contents, []byte("PK")) {
+		err = extractCoreBinaryTo(contents, writer)
+	} else if len(contents) == 0 || len(contents) > protocol.MaxUpgradePackageBytes {
+		err = errors.New("Core 候选文件大小无效")
+	} else {
+		_, err = writer.Write(contents)
+	}
+	if err == nil {
+		err = temporary.Chmod(0o700)
+	}
+	if err == nil {
+		err = temporary.Sync()
+	}
+	err = errors.Join(err, temporary.Close())
+	if err != nil {
+		return "", err
 	}
 	candidatePath := filepath.Join(stageDir, "xray")
 	if info, err := os.Lstat(candidatePath); err == nil {
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 			return "", errors.New("已有 Core 候选路径不安全")
 		}
-		stored, readErr := os.ReadFile(candidatePath)
-		if readErr != nil {
-			return "", readErr
-		}
-		if !bytes.Equal(stored, candidate) {
+		if candidateDigest(candidatePath) != hex.EncodeToString(digest.Sum(nil)) {
 			return "", errors.New("已有 Core 候选文件校验不匹配")
 		}
 		return candidatePath, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	if err := storage.WritePrivateAtomic(candidatePath, candidate); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(candidatePath, 0o700); err != nil {
+	if err := os.Rename(temporary.Name(), candidatePath); err != nil {
 		return "", err
 	}
 	return candidatePath, nil
@@ -206,8 +238,7 @@ func writeUpgradeFile(path string, contents []byte, expectedDigest string, mode 
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return errors.New("升级包暂存路径不安全")
 		}
-		stored, readErr := os.ReadFile(path)
-		if readErr == nil && bytes.Equal(packageDigest(stored), mustDigest(expectedDigest)) {
+		if strings.EqualFold(candidateDigest(path), expectedDigest) {
 			return nil
 		}
 		return errors.New("已有升级包校验不匹配")
@@ -230,44 +261,51 @@ func writeUpgradeFile(path string, contents []byte, expectedDigest string, mode 
 }
 
 func extractCoreBinary(contents []byte) ([]byte, error) {
+	var output bytes.Buffer
+	err := extractCoreBinaryTo(contents, &output)
+	return output.Bytes(), err
+}
+
+func extractCoreBinaryTo(contents []byte, output io.Writer) error {
 	reader, err := zip.NewReader(bytes.NewReader(contents), int64(len(contents)))
 	if err != nil || len(reader.File) == 0 || len(reader.File) > 32 {
-		return nil, errors.New("Core 升级包不是受支持的 ZIP")
+		return errors.New("Core 升级包不是受支持的 ZIP")
 	}
-	var result []byte
+	found := false
+	seen := map[string]bool{}
 	var expanded uint64
 	allowed := map[string]bool{"xray": true, "geoip.dat": true, "geosite.dat": true, "LICENSE": true, "README.md": true}
 	for _, item := range reader.File {
-		if !allowed[item.Name] || item.Name == "" || strings.ContainsAny(item.Name, `/\\`) || item.Mode()&0o170000 != 0 {
-			return nil, errors.New("Core 升级包包含未受控条目")
+		if !allowed[item.Name] || seen[item.Name] || item.Name == "" || strings.ContainsAny(item.Name, `/\\`) || item.Mode()&0o170000 != 0 {
+			return errors.New("Core 升级包包含未受控条目")
 		}
+		seen[item.Name] = true
 		if item.UncompressedSize64 > protocol.MaxUpgradePackageBytes || expanded > 128<<20-item.UncompressedSize64 {
-			return nil, errors.New("Core 升级包解压大小越界")
+			return errors.New("Core 升级包解压大小越界")
 		}
 		expanded += item.UncompressedSize64
 		file, openErr := item.Open()
 		if openErr != nil {
-			return nil, openErr
+			return openErr
 		}
+		destination := io.Writer(io.Discard)
 		if item.Name == "xray" {
-			contents, readErr := io.ReadAll(io.LimitReader(file, protocol.MaxUpgradePackageBytes+1))
-			closeErr := file.Close()
-			if readErr != nil || closeErr != nil || uint64(len(contents)) != item.UncompressedSize64 || len(contents) == 0 {
-				return nil, errors.New("Core 升级包条目无法读取")
+			if item.UncompressedSize64 == 0 {
+				file.Close()
+				return errors.New("Core 升级包 xray 为空")
 			}
-			result = contents
-			continue
+			destination, found = output, true
 		}
-		readCount, readErr := io.Copy(io.Discard, io.LimitReader(file, int64(item.UncompressedSize64)+1))
+		readCount, readErr := io.Copy(destination, io.LimitReader(file, int64(item.UncompressedSize64)+1))
 		closeErr := file.Close()
 		if readErr != nil || closeErr != nil || uint64(readCount) != item.UncompressedSize64 {
-			return nil, errors.New("Core 升级包条目无法读取")
+			return errors.New("Core 升级包条目无法读取")
 		}
 	}
-	if len(result) == 0 {
-		return nil, errors.New("Core 升级包缺少 xray 可执行文件")
+	if !found {
+		return errors.New("Core 升级包缺少 xray 可执行文件")
 	}
-	return result, nil
+	return nil
 }
 
 func officialXrayReleaseURL(version, architecture string) (string, error) {
@@ -287,12 +325,16 @@ func packageDigest(contents []byte) []byte {
 }
 
 func candidateDigest(path string) string {
-	contents, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	digest := sha256.Sum256(contents)
-	return hex.EncodeToString(digest[:])
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, io.LimitReader(file, protocol.MaxUpgradePackageBytes+1)); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func mustDigest(value string) []byte {

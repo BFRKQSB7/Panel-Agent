@@ -152,7 +152,7 @@ func (c *Client) CompletePairing(ctx context.Context) error {
 		Architecture:    c.identity.Architecture,
 		CPUCount:        c.identity.CPUCount,
 		MemoryBytes:     c.identity.MemoryBytes,
-		AgentVersion:    c.identity.AgentVersion,
+		AgentVersion:    protocol.AgentVersion,
 	}
 	var registered protocol.RegisterResponse
 	status, err = c.postJSON(ctx, "/api/v1/machines/register", request, "", &registered)
@@ -325,7 +325,7 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		Architecture:   c.identity.Architecture,
 		CPUCount:       c.identity.CPUCount,
 		MemoryBytes:    c.identity.MemoryBytes,
-		AgentVersion:   c.identity.AgentVersion,
+		AgentVersion:   protocol.AgentVersion,
 		Received:       true,
 		Applied:        false,
 		ApplyError:     protocol.ErrorCoreNotImplemented,
