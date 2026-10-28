@@ -55,6 +55,7 @@ type DesiredNode struct {
 }
 
 type ExtensionNode struct {
+	CoreMinVersion string `json:"core_min_version,omitempty"`
 	ID             string `json:"id"`
 	Version        string `json:"version"`
 	Kind           string `json:"kind"`

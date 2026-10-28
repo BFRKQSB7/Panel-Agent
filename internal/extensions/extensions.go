@@ -114,6 +114,7 @@ type SubscriptionRenderer struct {
 }
 
 type CompiledNode struct {
+	CoreMinVersion string `json:"core_min_version,omitempty"`
 	ID             string `json:"id"`
 	Version        string `json:"version"`
 	Kind           string `json:"kind"`
@@ -156,7 +157,7 @@ func Validate(pkg Package) error {
 		return fmt.Errorf("%w：名称或说明无效", ErrInvalidPackage)
 	}
 	hy2 := pkg.Renderers.Hysteria != nil
-	if !hy2 && (pkg.Manifest.Core.Kind != "xray" || !supportedCoreMinVersion(pkg.Manifest.Core.MinVersion)) || hy2 && (pkg.Manifest.Core.Kind != "hysteria" || pkg.Manifest.Core.MinVersion != "2.13.0") {
+	if !hy2 && (pkg.Manifest.Core.Kind != "xray" || !supportedCoreMinVersion(pkg.Manifest.Core.MinVersion)) || hy2 && (pkg.Manifest.Core.Kind != "hysteria" || pkg.Manifest.Core.MinVersion != "2.13.0" && pkg.Manifest.Core.MinVersion != "2.12.3") {
 		return fmt.Errorf("%w：Core 兼容范围无效", ErrInvalidPackage)
 	}
 	if pkg.Manifest.Capabilities.OneHop || pkg.Manifest.Capabilities.SingBox || !pkg.Manifest.Capabilities.Direct || !pkg.Manifest.Capabilities.URI || !pkg.Manifest.Capabilities.Mihomo || !pkg.Manifest.Capabilities.Certificate {
@@ -326,7 +327,11 @@ func CompileNode(pkg Package, values map[string]string) (CompiledNode, error) {
 	if err != nil || !samePublicKey(certificate, privateKey) {
 		return CompiledNode{}, fmt.Errorf("%w：私钥字段无效", ErrInvalidPackage)
 	}
-	return CompiledNode{ID: pkg.Manifest.ID, Version: pkg.Manifest.Version, Kind: RendererKind(pkg), SNI: sni, CertificatePEM: values["certificate_pem"], PrivateKeyPEM: values["private_key_pem"]}, nil
+	minimum := ""
+	if pkg.Renderers.Hysteria != nil {
+		minimum = pkg.Manifest.Core.MinVersion
+	}
+	return CompiledNode{CoreMinVersion: minimum, ID: pkg.Manifest.ID, Version: pkg.Manifest.Version, Kind: RendererKind(pkg), SNI: sni, CertificatePEM: values["certificate_pem"], PrivateKeyPEM: values["private_key_pem"]}, nil
 }
 
 func parseCertificate(value string) (*x509.Certificate, error) {

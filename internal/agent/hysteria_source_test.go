@@ -154,4 +154,7 @@ func TestHysteriaSourceCrashReplayAndFinalRetention(t *testing.T) {
 	if total != 160 {
 		t.Fatalf("restart total=%d, want 160", total)
 	}
+	if err := restarted.recoverStopped(ctx, at.Add(7*time.Second)); err != nil {
+		t.Fatalf("clock rollback prevented source closure: %v", err)
+	}
 }

@@ -1,6 +1,6 @@
 # Hysteria 2 官方内核
 
-VLESS+Reality/Trojan 使用 Xray，hy2 使用独立官方 Hysteria 2。当前固定 v2.13.0，支持 Direct、URI 和 Mihomo；hy2 One-Hop 与 sing-box 导出暂不可用。128MB 双内核和公网 NAT 结果必须单独验收，不能继承单 Xray 的资源结论。
+VLESS+Reality/Trojan 使用 Xray，hy2 使用独立官方 Hysteria 2。候选包固定 v2.13.0，同时保留经过校验的 v2.12.3 作为兼容及升级基线；仅接受已列入白名单的官方资产。支持 Direct、URI 和 Mihomo；hy2 One-Hop 与 sing-box 导出暂不可用。128MB 双内核和公网 NAT 结果必须单独验收，不能继承单 Xray 的资源结论。
 
 ## 安装与运行
 
@@ -37,6 +37,22 @@ control-agent run --data-dir /var/lib/panel-agent/agent \
 
 每个 hy2 入口为独立受管实例，权限、到期和三维配额来自 Agent 本地快照。撤销会停止受影响实例以终止已有连接；随后只为仍获授权的用户重建。Panel 暂时不可用时保持本地权限、继续采样，恢复后补报。Agent 退出会终止 hy2；再次启动时先确认旧实例停止，再重放旧来源并建立新计数来源。无法观测的退出尾部标记 gap，不宣称完整无损。
 
-普通卸载保留配置、证书和未 ACK 账本；只有显式 purge 删除项目自己的数据。当前版本仅接受固定官方资产，手动替换其他版本会被拒绝。独立版本升级/失败回滚的运维闭环尚需补齐，不应直接替换正在运行的二进制。
+普通卸载保留配置、证书和未 ACK 账本；只有显式 purge 删除项目自己的数据。手动替换其他版本会被拒绝。扩展声明的最低版本会下发给 Agent，内核不满足时拒绝应用，不能把最低版本不符的节点上报为成功。
+
+## 本机手动升级与回滚
+
+先停止 Agent 服务，使用 Agent 数据目录所属用户执行独立升级，再启动服务；升级期间 hy2 短暂中断，CLI 不向其他机器发布升级意图。候选必须是对应架构的已支持官方可执行文件，SHA256 和目标版本必须同时匹配；禁止降级。
+
+```sh
+sudo systemctl stop panel-agent-agent
+sudo -u panel-agent /opt/panel-agent/bin/control-agent upgrade-hysteria \
+  --data-dir /var/lib/panel-agent/agent \
+  --hysteria-path /var/lib/panel-agent/agent/runtime/hysteria \
+  --package /绝对路径/hysteria-linux-amd64 --target-version 2.13.0 \
+  --sha256 907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691
+sudo systemctl start panel-agent-agent
+```
+
+升级先保留回滚副本和持久日志，再停止受影响实例、原子替换和检查实际监听/统计接口。失败恢复旧二进制及原有授权配置；中途退出则下次启动按日志恢复，已经提交成功的升级保留新版本。未确认账本不删除，启动/停止无法观测的尾部保持 gap 标记。若报告恢复文件校验不符，保留文件排查，不手工删除日志掩盖失败。当前已验证 `2.12.3 → 2.13.0`，未来版本需先更新适配白名单。
 
 官方依据：[服务端配置](https://v2.hysteria.network/docs/advanced/Full-Server-Config/)、[统计 API](https://v2.hysteria.network/docs/advanced/Traffic-Stats-API/)、[URI](https://v2.hysteria.network/docs/developers/URI-Scheme/)。

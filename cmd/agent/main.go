@@ -67,6 +67,8 @@ func run(args []string) error {
 		return runPair(args[1:], true)
 	case "sync":
 		return runSync(args[1:])
+	case "upgrade-hysteria":
+		return runHysteriaUpgrade(args[1:])
 	case "run":
 		return runAgent(args[1:])
 	case "ledger":
@@ -244,6 +246,30 @@ func runSync(args []string) error {
 		fmt.Fprintln(os.Stdout, "已同步配置、完成 Core 应用与健康检查并上报状态。")
 	}
 	return nil
+}
+
+func runHysteriaUpgrade(args []string) error {
+	flags := flag.NewFlagSet("upgrade-hysteria", flag.ContinueOnError)
+	dir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
+	binary := flags.String("hysteria-path", "", "project-owned official Hysteria executable")
+	candidate := flags.String("package", "", "local verified official executable")
+	version := flags.String("target-version", "", "target Hysteria version")
+	digest := flags.String("sha256", "", "official asset SHA256")
+	ca := flags.String("ca-cert", "", "additional Panel CA")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *binary == "" || *candidate == "" || *version == "" || *digest == "" {
+		return errors.New("用法：control-agent upgrade-hysteria --hysteria-path PATH --package PATH --target-version VERSION --sha256 SHA256 [--data-dir PATH]")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	client, err := agent.LoadClient(*dir, *ca)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.EnableCores(ctx, "", *binary, false); err != nil {
+		return err
+	}
+	return client.UpgradeHysteria(ctx, *candidate, *version, *digest)
 }
 
 func runAgent(args []string) error {

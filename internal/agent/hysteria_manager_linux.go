@@ -32,16 +32,18 @@ type hysteriaRecord struct {
 }
 
 type hysteriaManager struct {
-	mu          sync.Mutex
-	dir, binary string
-	book        *ledger.Store
-	lifecycle   context.Context
-	cancel      context.CancelFunc
-	record      hysteriaRecord
-	sessions    map[string]*hysteriaSession
-	hashes      map[string]string
-	lastError   error
-	instanceID  string
+	mu                sync.Mutex
+	dir, binary       string
+	book              *ledger.Store
+	lifecycle         context.Context
+	cancel            context.CancelFunc
+	record            hysteriaRecord
+	sessions          map[string]*hysteriaSession
+	hashes            map[string]string
+	lastError         error
+	instanceID        string
+	version           string
+	upgradeCheckpoint func(string)
 }
 
 func newHysteriaManager(ctx context.Context, dir, binary string, book *ledger.Store) (*hysteriaManager, error) {
@@ -50,9 +52,6 @@ func newHysteriaManager(ctx context.Context, dir, binary string, book *ledger.St
 	}
 	// Pin the actual official artifact, not a version string supplied by an
 	// arbitrary executable. Upgrade support must explicitly extend this allowlist.
-	if err := hysteria.VerifyOfficialBinary(binary, runtime.GOARCH); err != nil {
-		return nil, err
-	}
 	root, err := storage.PrepareDataDir(dir)
 	if err != nil {
 		return nil, err
@@ -63,6 +62,13 @@ func newHysteriaManager(ctx context.Context, dir, binary string, book *ledger.St
 	if err := recoverHysteriaSessions(ctx, root, book, binary); err != nil {
 		return nil, err
 	}
+	if err := recoverHysteriaUpgrade(root, binary); err != nil {
+		return nil, err
+	}
+	version, err := hysteria.VerifiedVersion(binary, runtime.GOARCH)
+	if err != nil {
+		return nil, err
+	}
 	life, cancel := context.WithCancel(ctx)
 	instanceID, err := security.NewUUID()
 	if err != nil {
@@ -71,6 +77,7 @@ func newHysteriaManager(ctx context.Context, dir, binary string, book *ledger.St
 	}
 	m := &hysteriaManager{dir: root, binary: binary, book: book, lifecycle: life, cancel: cancel, sessions: map[string]*hysteriaSession{}, hashes: map[string]string{}, record: hysteriaRecord{Version: 1}}
 	m.instanceID = instanceID
+	m.version = version
 	m.record.Generation = 1
 	p := filepath.Join(root, "hysteria-state.json")
 	if info, err := os.Lstat(p); err == nil {
@@ -167,6 +174,9 @@ func (m *hysteriaManager) applyLocked(ctx context.Context, authority string, rev
 	for _, node := range desired.Nodes {
 		if node.Extension == nil || node.Extension.Kind != "hysteria2_tls" {
 			continue
+		}
+		if node.Extension.CoreMinVersion != "" && compareCoreVersions(m.version, node.Extension.CoreMinVersion) < 0 {
+			return errors.New("hysteria: node requires a newer official core")
 		}
 		accounts, err := hysteriaAccounts(node, desired.QuotaRestrictions, time.Now().UTC())
 		if err != nil {

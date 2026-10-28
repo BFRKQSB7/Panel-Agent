@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -194,4 +196,93 @@ func TestHysteriaSessionLedgerFailureStopsOfficialCore(t *testing.T) {
 		t.Fatal("fresh sync did not resolve interrupted change")
 	}
 	t.Log("manager applied, restored, revoked and fenced interrupted changes")
+	if previous := os.Getenv("PANEL_AGENT_TEST_HYSTERIA_PREVIOUS"); previous != "" {
+		fenced.Close()
+		owned := filepath.Join(dir, "hysteria-owned")
+		if err := copyAgentProgram(previous, owned); err != nil {
+			t.Fatal(err)
+		}
+		upgrader, err := newHysteriaManager(ctx, dir, owned, reopened)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(upgrader.Close)
+		requiring := upgrader.record.Desired
+		requiring.Nodes = append([]protocol.DesiredNode{}, requiring.Nodes...)
+		extension := *requiring.Nodes[0].Extension
+		extension.CoreMinVersion = "2.13.0"
+		requiring.Nodes[0].Extension = &extension
+		requiredDigest, err := protocol.DigestDesiredState(requiring)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := upgrader.Apply(ctx, authority, 4, requiredDigest, requiring); err == nil {
+			t.Fatal("minimum core version not enforced")
+		}
+		// A rejected configuration leaves the original official process alive.
+		if _, err := upgrader.sessions[nodeID].instance.Snapshot(ctx); err != nil {
+			t.Fatal(err)
+		}
+		upgrader.lastError = nil
+		upgrader.upgradeCheckpoint = func(phase string) {
+			if phase == "swapped" {
+				if err := os.Chmod(owned, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		newSHA := candidateDigest(binary)
+		if err := upgrader.Upgrade(ctx, binary, "2.13.0", newSHA); err == nil {
+			t.Fatal("unexecutable candidate did not trigger rollback")
+		}
+		if version, err := hysteria.VerifiedVersion(owned, runtime.GOARCH); err != nil || version != "2.12.3" || !upgrader.Matches(authority, 3, digest) {
+			t.Fatalf("failed candidate did not restore healthy baseline: %s %v", version, err)
+		}
+		upgrader.upgradeCheckpoint = nil
+		if err := upgrader.Upgrade(ctx, binary, "2.13.0", newSHA); err != nil {
+			t.Fatal(err)
+		}
+		if err := upgrader.Upgrade(ctx, previous, "2.12.3", candidateDigest(previous)); err == nil {
+			t.Fatal("downgrade accepted")
+		}
+		upgrader.Close()
+		for _, phase := range []string{"prepared", "swapped", "committed"} {
+			if err := os.Remove(owned); err != nil {
+				t.Fatal(err)
+			}
+			if err := copyAgentProgram(previous, owned); err != nil {
+				t.Fatal(err)
+			}
+			j := hysteriaUpgradeJournal{Version: 1, Binary: owned, Staged: owned + ".candidate", Backup: owned + ".previous", OriginalSHA: candidateDigest(previous), TargetSHA: newSHA, ConfigDigest: digest, Committed: phase == "committed"}
+			if err := copyAgentProgram(binary, j.Staged); err != nil {
+				t.Fatal(err)
+			}
+			if err := copyAgentProgram(previous, j.Backup); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeHysteriaUpgrade(dir, j); err != nil {
+				t.Fatal(err)
+			}
+			if phase != "prepared" {
+				if err := os.Rename(j.Staged, owned); err != nil {
+					t.Fatal(err)
+				}
+			}
+			recovered, err := newHysteriaManager(ctx, dir, owned, reopened)
+			if err != nil {
+				t.Fatal(err)
+			}
+			version, err := hysteria.VerifiedVersion(owned, runtime.GOARCH)
+			want := "2.12.3"
+			if phase == "committed" {
+				want = "2.13.0"
+			}
+			if err != nil || version != want || !recovered.Matches(authority, 3, digest) {
+				recovered.Close()
+				t.Fatalf("%s journal recovery: version=%s want=%s err=%v", phase, version, want, err)
+			}
+			recovered.Close()
+		}
+		t.Log("cross-version upgrade, startup-failure rollback and prepared/swapped/committed journal recovery passed")
+	}
 }

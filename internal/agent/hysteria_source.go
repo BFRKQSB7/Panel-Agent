@@ -302,5 +302,8 @@ func (s *hysteriaSource) recoverStopped(ctx context.Context, at time.Time) error
 	if s.state.Closed {
 		return nil
 	}
+	if at.Before(s.state.LastAt) {
+		at = s.state.LastAt
+	}
 	return s.recordLocked(ctx, s.state.Last, at, true, "hysteria_process_tail_unobserved")
 }

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"panel-agent.local/panel-agent/internal/agent"
+	"panel-agent.local/panel-agent/internal/backup"
 	"panel-agent.local/panel-agent/internal/extensions"
 	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
@@ -81,6 +82,10 @@ func TestOfficialHysteriaPanelClientSubscriptionAndRevocation(t *testing.T) {
 	pkg := testExtensionPackage()
 	pkg.Manifest.ID = "official-hysteria2"
 	pkg.Manifest.Core = extensions.CoreSupport{Kind: "hysteria", MinVersion: "2.13.0"}
+	previousBinary := os.Getenv("PANEL_AGENT_TEST_HYSTERIA_PREVIOUS")
+	if previousBinary != "" {
+		pkg.Manifest.Core.MinVersion = "2.12.3"
+	}
 	pkg.Renderers.Xray = extensions.XrayRenderer{}
 	pkg.Renderers.Hysteria = &extensions.HysteriaRenderer{Kind: "hysteria2_tls", Version: 2}
 	pkg.Renderers.URI.Kind = "hysteria2_tls"
@@ -123,11 +128,39 @@ func TestOfficialHysteriaPanelClientSubscriptionAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if err := client.EnableCores(ctx, os.Getenv("PANEL_AGENT_TEST_XRAY"), binary, false, true); err != nil {
+	runtimeBinary := binary
+	if previousBinary != "" {
+		runtimeBinary = filepath.Join(agentDir, "hysteria-owned")
+		input, err := os.Open(previousBinary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, err := os.OpenFile(runtimeBinary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+		if err != nil {
+			input.Close()
+			t.Fatal(err)
+		}
+		_, copyErr := io.Copy(output, input)
+		input.Close()
+		closeErr := output.Close()
+		if copyErr != nil || closeErr != nil {
+			t.Fatalf("baseline fixture copy: %v %v", copyErr, closeErr)
+		}
+	}
+	if err := client.EnableCores(ctx, os.Getenv("PANEL_AGENT_TEST_XRAY"), runtimeBinary, false, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.SyncOnce(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if previousBinary != "" {
+		if err := client.UpgradeHysteria(ctx, binary, "2.13.0", "907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691"); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.SyncOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("official 2.12.3 to 2.13.0 upgrade preserved Panel configuration")
 	}
 	status, err := server.store.GetMachine(ctx, machine)
 	if err != nil {
@@ -250,6 +283,29 @@ func TestOfficialHysteriaPanelClientSubscriptionAndRevocation(t *testing.T) {
 		}
 		t.Logf("UDP forwarding survived control outage and reconciled: %d bytes", after.Global.UsedBytes)
 	}
+	previousAuthority := client.Identity().AuthorityEpoch
+	bundleData, _, err := server.createBackup(ctx, "hy2-restore-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := backup.Open(bundleData, "hy2-restore-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.restoreBundle(ctx, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if client.Identity().AuthorityEpoch == previousAuthority {
+		t.Fatal("Panel restore did not rotate authority")
+	}
+	restoredNode, err := server.store.GetNode(ctx, machine, node.NodeID)
+	if err != nil || restoredNode.ExtensionKind != "hysteria2_tls" {
+		t.Fatalf("hy2 extension not restored: %v", err)
+	}
+	t.Log("backup restore preserved hy2 extension and Agent reconnected under new authority")
 	if _, err := server.store.SaveUser(ctx, user.UserID, storage.UserInput{Name: user.Name, UserGroupID: ug.GroupID, Enabled: false}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}

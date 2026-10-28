@@ -23,3 +23,7 @@ func (*hysteriaManager) Sample(context.Context) error        { return nil }
 func (*hysteriaManager) Reconcile(context.Context) error     { return nil }
 func (*hysteriaManager) Matches(string, uint64, string) bool { return false }
 func (*hysteriaManager) Close()                              {}
+
+func (c *Client) UpgradeHysteria(context.Context, string, string, string) error {
+	return errors.New("Hysteria upgrade requires Linux")
+}

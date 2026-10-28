@@ -329,5 +329,5 @@ func (s *Store) nodeExtensionTx(ctx context.Context, tx *sql.Tx, nodeID string) 
 	if err != nil {
 		return nil, false, err
 	}
-	return &protocol.ExtensionNode{ID: compiled.ID, Version: compiled.Version, Kind: compiled.Kind, SNI: compiled.SNI, CertificatePEM: compiled.CertificatePEM, PrivateKeyPEM: compiled.PrivateKeyPEM}, enabled, nil
+	return &protocol.ExtensionNode{CoreMinVersion: compiled.CoreMinVersion, ID: compiled.ID, Version: compiled.Version, Kind: compiled.Kind, SNI: compiled.SNI, CertificatePEM: compiled.CertificatePEM, PrivateKeyPEM: compiled.PrivateKeyPEM}, enabled, nil
 }
