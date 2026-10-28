@@ -382,6 +382,7 @@ func (s *Store) refreshMachineDesiredTxMode(ctx context.Context, tx *sql.Tx, mac
 	if err != nil {
 		return err
 	}
+	state.TrafficReportingEnabled = true
 	state.Exit, state.TransitOutbounds, err = s.desiredTransitTx(ctx, tx, machineID, state)
 	if err != nil {
 		return err

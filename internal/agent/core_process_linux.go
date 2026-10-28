@@ -112,9 +112,17 @@ func stopCoreProcess(ctx context.Context, process coreProcess, binary string) er
 }
 
 func startCoreCommand(binary, configPath string, logPaths ...string) (coreProcess, error) {
+	logPath := ""
+	if len(logPaths) > 0 {
+		logPath = logPaths[0]
+	}
+	return startCoreCommandWithParent(binary, configPath, logPath, false)
+}
+
+func startCoreCommandWithParent(binary, configPath, logPath string, stopWithParent bool) (coreProcess, error) {
 	outputPath := os.DevNull
-	if len(logPaths) > 0 && logPaths[0] != "" {
-		outputPath = logPaths[0]
+	if logPath != "" {
+		outputPath = logPath
 		info, err := os.Lstat(outputPath)
 		if err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular()) {
 			return coreProcess{}, errors.New("Core log must be a regular file")
@@ -134,6 +142,9 @@ func startCoreCommand(binary, configPath string, logPaths ...string) (coreProces
 	command := exec.Command(binary, "run", "-config", configPath)
 	command.Stdout, command.Stderr = output, output
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if stopWithParent {
+		command.SysProcAttr.Pdeathsig = syscall.SIGKILL
+	}
 	if err := command.Start(); err != nil {
 		return coreProcess{}, err
 	}

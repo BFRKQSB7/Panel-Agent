@@ -9,7 +9,7 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
 | Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
 |---|---|---|---|---|---|
-| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 已接 Client 主循环/双内核 applied 门控、hy2-only CLI、独立受限 Hysteria 扩展声明、证书加密复用、URI/Mihomo 与官方校验固定版本。官方 v2.13.0 Linux smoke 覆盖管理器应用/离线恢复/撤销/中断变更围栏，账本日志重放/来源归零/未 ACK 保留及失败停服通过；Windows 相关包测试/vet 通过。独立 Hysteria manager 的应用/恢复有真实 Core 证据，完整 Panel→Client→订阅代理仍待验收；接下来补安装/更新/恢复组合、真实业务流与断联测试。公网 NAT/资源未验收；懒猫 UDP 映射待设置，不构成开发阻塞。 |
+| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | Client/扩展/URI/Mihomo/独立官方内核与账本已贯通。官方 v2.13.0 的 Linux Panel→Agent→订阅认证、真实 HTTP/UDP DNS 转发、控制通道 503 期间继续服务/恢复补账及用户撤销通过；分别运行 hy2-only 与 Xray 共存（Xray 只承载管理监听）组合。修复 mapped CIDR 误封所有 IPv4、生产快照未开启流量上报，并补旧快照单次 revision 迁移。测试子进程增加父进程退出终止，双内核 smoke 退出后无遗留进程。待安装/升级/备份恢复组合及动态教程；公网 NAT/资源未验收。 |
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | DONE | high | — | 指定且获用户接受的玩具冰岛 128MiB 整机容器 smoke 通过：16 次 Reality 请求/分入口累计 Stats/重启清零；系统采样峰值 64.1MiB，OOM 零，原服务保留；WSL 回归通过。 |
 | [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |

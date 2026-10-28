@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,39 @@ func serverOptions(t *testing.T) ServerOptions {
 		PrivateKeyPEM:  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})),
 		InstanceDir:    "/var/lib/panel-agent/agent/hysteria/node-1", AuthAddress: "127.0.0.1:11000", AuthRouteToken: testSecret,
 		StatsAddress: "127.0.0.1:11001", StatsSecret: strings.Repeat("b", 32),
+	}
+}
+
+func TestHysteriaCIDRRulesPreservePublicIPv4AndRejectMappedPrivate(t *testing.T) {
+	files, err := RenderServer(serverOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		ACL struct {
+			Inline []string `json:"inline"`
+		} `json:"acl"`
+	}
+	if err := json.Unmarshal(files.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	// Official cidrMatcher uses net.IPNet.Contains, including its IPv4-mapped
+	// normalization. A blanket ::ffff:0:0/96 reject would block all IPv4.
+	for _, address := range []string{"1.1.1.1", "2606:4700:4700::1111", "127.0.0.1", "::ffff:127.0.0.1", "10.0.0.1", "::1"} {
+		blocked := false
+		for _, rule := range config.ACL.Inline {
+			if strings.HasPrefix(rule, "reject(") {
+				_, network, err := net.ParseCIDR(strings.TrimSuffix(strings.TrimPrefix(rule, "reject("), ")"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				blocked = blocked || network.Contains(net.ParseIP(address))
+			}
+		}
+		want := address != "1.1.1.1" && address != "2606:4700:4700::1111"
+		if blocked != want {
+			t.Fatalf("ACL blocked %s=%v, want %v", address, blocked, want)
+		}
 	}
 }
 

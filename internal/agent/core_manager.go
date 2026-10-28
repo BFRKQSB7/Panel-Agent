@@ -80,11 +80,12 @@ type CoreManager struct {
 	developmentLoopback bool
 	ledger              *ledger.Store
 	hysteriaConfigured  bool
+	stopWithParent      bool
 	// Used only by subprocess tests to interrupt durable upgrade phases.
 	upgradeCheckpoint func(string)
 }
 
-func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*CoreManager, error) {
+func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool, stopWithParent ...bool) (*CoreManager, error) {
 	if !managedCoreSupported {
 		return nil, errors.New("受管 Core 需要 Linux；Windows 可运行 Panel 与控制通道测试")
 	}
@@ -130,6 +131,9 @@ func NewCoreManager(dataDir, binaryPath string, developmentLoopback bool) (*Core
 		return nil, errors.New("Core 适配器不接受该 Xray 版本")
 	}
 	m := &CoreManager{dir: dir, binary: binary, binaryVersion: version, coreOwned: coreOwned, logPath: filepath.Join(dir, "core.log"), developmentLoopback: developmentLoopback}
+	if len(stopWithParent) > 0 {
+		m.stopWithParent = stopWithParent[0]
+	}
 	if err := m.load(); err != nil {
 		return nil, err
 	}
@@ -343,7 +347,7 @@ func (m *CoreManager) start(ctx context.Context, record *coreConfigRecord, phase
 	if err := m.save(next); err != nil {
 		return coreProcess{}, err
 	}
-	process, err := startCoreCommand(m.binary, m.configPath(record), m.logPath)
+	process, err := startCoreCommandWithParent(m.binary, m.configPath(record), m.logPath, m.stopWithParent)
 	if err != nil {
 		return coreProcess{}, err
 	}

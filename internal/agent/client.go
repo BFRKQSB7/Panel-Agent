@@ -90,6 +90,11 @@ func (c *Client) Close() {
 		c.hysteria.Close()
 		c.hysteria = nil
 	}
+	if c.core != nil && c.core.stopWithParent {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = c.core.stopTransient(cleanup)
+		cancel()
+	}
 	if c.ledger != nil {
 		_ = c.ledger.Close()
 		c.ledger = nil
@@ -113,7 +118,7 @@ func (c *Client) EnableCore(ctx context.Context, binaryPath string, developmentL
 	return c.EnableCores(ctx, binaryPath, "", developmentLoopback)
 }
 
-func (c *Client) EnableCores(ctx context.Context, binaryPath, hysteriaPath string, developmentLoopback bool) error {
+func (c *Client) EnableCores(ctx context.Context, binaryPath, hysteriaPath string, developmentLoopback bool, stopWithParent ...bool) error {
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
 	if c.core != nil {
@@ -134,7 +139,7 @@ func (c *Client) EnableCores(ctx context.Context, binaryPath, hysteriaPath strin
 		c.hysteria, err = newHysteriaManager(ctx, c.store.dataDir, hysteriaPath, book)
 		return err
 	}
-	manager, err := NewCoreManager(c.store.dataDir, binaryPath, developmentLoopback)
+	manager, err := NewCoreManager(c.store.dataDir, binaryPath, developmentLoopback, stopWithParent...)
 	if err != nil {
 		return err
 	}

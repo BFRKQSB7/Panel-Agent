@@ -31,3 +31,7 @@ func stopCoreProcess(context.Context, coreProcess, string) error {
 func startCoreCommand(string, string, ...string) (coreProcess, error) {
 	return coreProcess{}, errors.New("managed Core requires Linux")
 }
+
+func startCoreCommandWithParent(string, string, string, bool) (coreProcess, error) {
+	return coreProcess{}, errors.New("managed Core requires Linux")
+}

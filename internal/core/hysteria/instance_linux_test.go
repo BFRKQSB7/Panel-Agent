@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -106,6 +107,7 @@ func TestOfficialInstanceLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		command := exec.CommandContext(ctx, binary, "client", "--config", p)
+		command.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		if err := command.Start(); err != nil {
 			t.Fatal(err)
 		}

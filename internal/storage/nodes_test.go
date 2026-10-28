@@ -12,6 +12,61 @@ import (
 	"panel-agent.local/panel-agent/internal/security"
 )
 
+func TestLegacyProductionSnapshotEnablesReportingWithNewRevision(t *testing.T) {
+	store := openMachineTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	join, candidate, registration := testSecrets(t)
+	if err := store.CreateJoinToken(ctx, security.HashToken(join), "", now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	machine, _, err := store.RegisterMachine(ctx, testRegistration(join, candidate, registration), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNode(ctx, machine.MachineID, "", NodeInput{Name: "legacy", PublicHost: "edge.example.test", PublicPort: 45001, ListenHost: "127.0.0.1", ListenPort: 18443, ServerName: "example.com", Enabled: true}, now); err != nil {
+		t.Fatal(err)
+	}
+	authority, err := store.GetMachineDesiredState(ctx, machine.MachineID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !authority.Snapshot.TrafficReportingEnabled {
+		t.Fatal("new production snapshot omitted reporting")
+	}
+	authority.Snapshot.TrafficReportingEnabled = false
+	legacyDigest, err := protocol.DigestDesiredState(authority.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := json.Marshal(authority.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := security.SealSecret(store.masterKey, plain, "machine-desired:"+machine.MachineID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, "UPDATE machines SET desired_digest=?,desired_snapshot=? WHERE machine_id=?", legacyDigest, sealed, machine.MachineID); err != nil {
+		t.Fatal(err)
+	}
+	requestID, _ := security.NewUUID()
+	response, err := store.DesiredStateExchange(ctx, machine.MachineID, protocol.DesiredStateRequest{RequestID: requestID, AuthorityEpoch: authority.Epoch, Revision: authority.Revision, Digest: legacyDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.DesiredState == nil || !response.DesiredState.TrafficReportingEnabled || response.Revision != authority.Revision+1 || response.Digest == legacyDigest {
+		t.Fatal("legacy snapshot changed without a new authenticated revision")
+	}
+	again, err := store.DesiredStateExchange(ctx, machine.MachineID, protocol.DesiredStateRequest{RequestID: requestID, AuthorityEpoch: response.AuthorityEpoch, Revision: response.Revision, Digest: response.Digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.Unchanged || again.Revision != response.Revision {
+		t.Fatal("reporting migration repeated on every pull")
+	}
+}
+
 func TestNodeSnapshotsArePrivateScopedAndKeepTombstones(t *testing.T) {
 	store := openMachineTestStore(t)
 	ctx := context.Background()

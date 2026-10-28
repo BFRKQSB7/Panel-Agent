@@ -83,7 +83,7 @@ func RenderServer(o ServerOptions) (ServerFiles, error) {
 			"reject(0.0.0.0/8)", "reject(10.0.0.0/8)", "reject(100.64.0.0/10)", "reject(127.0.0.0/8)",
 			"reject(169.254.0.0/16)", "reject(172.16.0.0/12)", "reject(192.168.0.0/16)",
 			"reject(224.0.0.0/4)", "reject(240.0.0.0/4)", "reject(::/128)", "reject(::1/128)",
-			"reject(::ffff:0:0/96)", "reject(fc00::/7)", "reject(fe80::/10)", "reject(ff00::/8)", "direct(all)",
+			"reject(fc00::/7)", "reject(fe80::/10)", "reject(ff00::/8)", "direct(all)",
 		}},
 	}
 	data, err := json.MarshalIndent(config, "", "  ")

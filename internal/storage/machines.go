@@ -426,6 +426,22 @@ func (s *Store) DesiredStateExchange(ctx context.Context, machineID string, requ
 	if err != nil {
 		return protocol.DesiredStateResponse{}, err
 	}
+	// D08's fixture-only reporting switch must not strand production usage.
+	// Upgrade an old, policy-bearing snapshot once, preserving revision/digest
+	// semantics rather than changing an authenticated snapshot in place.
+	if !authority.Snapshot.TrafficReportingEnabled && len(authority.Snapshot.PeriodPolicies) > 0 {
+		if err := s.refreshMachineDesiredTx(ctx, tx, machineID); err != nil {
+			return protocol.DesiredStateResponse{}, err
+		}
+		machine, err = getMachineTx(ctx, tx, machineID)
+		if err != nil {
+			return protocol.DesiredStateResponse{}, err
+		}
+		authority, err = s.machineDesiredTx(ctx, tx, machine)
+		if err != nil {
+			return protocol.DesiredStateResponse{}, err
+		}
+	}
 	response := protocol.DesiredStateResponse{RequestID: request.RequestID, AuthorityEpoch: authority.Epoch, Revision: authority.Revision, Digest: authority.Digest}
 	if machine.AuthorityEpoch != authority.Epoch {
 		if request.AuthorityEpoch == authority.Epoch && request.AuthorityNonce != "" &&
