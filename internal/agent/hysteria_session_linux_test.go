@@ -126,4 +126,72 @@ func TestHysteriaSessionLedgerFailureStopsOfficialCore(t *testing.T) {
 		t.Fatal("recovered counter source leaked")
 	}
 	t.Log("restart replayed pending observation and retired only the stopped source")
+	// Exercise the same manager used by Client: stable offline recovery, status
+	// generation continuity, revocation and interrupted-change fencing.
+	node.PublicHost, node.PublicPort, node.Name = "edge.example.com", 45001, "official-hy2"
+	node.Extension = &protocol.ExtensionNode{ID: "official-hysteria2", Version: "1.0.0", Kind: "hysteria2_tls", SNI: options.ServerName, CertificatePEM: options.CertificatePEM, PrivateKeyPEM: options.PrivateKeyPEM}
+	authority, _ := security.NewUUID()
+	desired := protocol.DesiredState{Nodes: []protocol.DesiredNode{node}, PeriodPolicies: policies}
+	digest, err := protocol.DigestDesiredState(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := newHysteriaManager(ctx, dir, binary, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	if err := manager.Apply(ctx, authority, 1, digest, desired); err != nil {
+		t.Fatal(err)
+	}
+	if !manager.Matches(authority, 1, digest) {
+		t.Fatal("complete official apply not recognized")
+	}
+	firstGeneration := manager.Status().Generation
+	manager.Close()
+	restored, err := newHysteriaManager(ctx, dir, binary, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restored.Close)
+	if !restored.Matches(authority, 1, digest) || restored.Status().Generation <= firstGeneration {
+		t.Fatal("offline restore lost status generation continuity")
+	}
+	desired.Nodes = []protocol.DesiredNode{node}
+	desired.Nodes[0].Credentials = nil
+	revokedDigest, err := protocol.DigestDesiredState(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restored.Apply(ctx, authority, 2, revokedDigest, desired); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.sessions) != 0 || !restored.Matches(authority, 2, revokedDigest) {
+		t.Fatal("revocation did not stop instance")
+	}
+	desired.Nodes = []protocol.DesiredNode{node}
+	pending := restored.record
+	pending.Revision = 3
+	pending.Digest = digest
+	pending.Desired = desired
+	pending.Pending = true
+	if err := restored.save(pending); err != nil {
+		t.Fatal(err)
+	}
+	restored.Close()
+	fenced, err := newHysteriaManager(ctx, dir, binary, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(fenced.Close)
+	if len(fenced.sessions) != 0 || fenced.Matches(authority, 3, digest) {
+		t.Fatal("interrupted permission change resumed without fresh sync")
+	}
+	if err := fenced.Apply(ctx, authority, 3, digest, desired); err != nil {
+		t.Fatal(err)
+	}
+	if !fenced.Matches(authority, 3, digest) {
+		t.Fatal("fresh sync did not resolve interrupted change")
+	}
+	t.Log("manager applied, restored, revoked and fenced interrupted changes")
 }

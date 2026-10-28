@@ -106,7 +106,7 @@ func validateTransitOutbound(outbound TransitOutbound) error {
 }
 
 func validateExtension(extension ExtensionNode) error {
-	if !ValidText(extension.ID, 64) || !ValidText(extension.Version, 32) || extension.Kind != "trojan_tls" {
+	if !ValidText(extension.ID, 64) || !ValidText(extension.Version, 32) || extension.Kind != "trojan_tls" && extension.Kind != "hysteria2_tls" {
 		return errors.New("扩展身份或类型无效")
 	}
 	if _, err := NormalizeHost(extension.SNI); err != nil || net.ParseIP(extension.SNI) != nil {

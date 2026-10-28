@@ -37,6 +37,7 @@ type Client struct {
 	processLock *storage.ProcessLock
 	core        *CoreManager
 	ledger      *ledger.Store
+	hysteria    *hysteriaManager
 }
 
 type APIError struct {
@@ -85,6 +86,10 @@ func NewClient(store *identityStore, identity Identity, caCertPath string) (*Cli
 }
 
 func (c *Client) Close() {
+	if c.hysteria != nil {
+		c.hysteria.Close()
+		c.hysteria = nil
+	}
 	if c.ledger != nil {
 		_ = c.ledger.Close()
 		c.ledger = nil
@@ -105,10 +110,29 @@ func (c *Client) Identity() Identity {
 // EnableCore recovers the local Current/LKG before contacting Panel, so a
 // disconnected Agent can restore service using its persisted configuration.
 func (c *Client) EnableCore(ctx context.Context, binaryPath string, developmentLoopback bool) error {
+	return c.EnableCores(ctx, binaryPath, "", developmentLoopback)
+}
+
+func (c *Client) EnableCores(ctx context.Context, binaryPath, hysteriaPath string, developmentLoopback bool) error {
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
 	if c.core != nil {
 		return errors.New("Core manager is already enabled")
+	}
+	if c.hysteria != nil {
+		return errors.New("Hysteria manager is already enabled")
+	}
+	if binaryPath == "" {
+		if hysteriaPath == "" {
+			return errors.New("请指定至少一个内核")
+		}
+		book, err := ledger.Open(c.store.dataDir, c.identity.MachineID)
+		if err != nil {
+			return err
+		}
+		c.ledger = book
+		c.hysteria, err = newHysteriaManager(ctx, c.store.dataDir, hysteriaPath, book)
+		return err
 	}
 	manager, err := NewCoreManager(c.store.dataDir, binaryPath, developmentLoopback)
 	if err != nil {
@@ -119,6 +143,13 @@ func (c *Client) EnableCore(ctx context.Context, binaryPath string, developmentL
 		return err
 	}
 	c.core, c.ledger, manager.ledger = manager, book, book
+	if hysteriaPath != "" {
+		manager.hysteriaConfigured = true
+		c.hysteria, err = newHysteriaManager(ctx, c.store.dataDir, hysteriaPath, book)
+		if err != nil {
+			return err
+		}
+	}
 	if err := manager.Recover(ctx); err != nil {
 		return err
 	}
@@ -197,6 +228,11 @@ func (c *Client) acceptRegistration(response protocol.RegisterResponse) error {
 func (c *Client) SyncOnce(ctx context.Context) (syncErr error) {
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
+	if c.hysteria != nil {
+		// Keep local expiry/recovery active even while the Panel is unreachable;
+		// a local failure must not prevent fetching a corrective snapshot.
+		_ = c.hysteria.Reconcile(ctx)
+	}
 	if c.core != nil {
 		defer func() {
 			if ctx.Err() == nil {
@@ -289,13 +325,33 @@ func (c *Client) SyncOnce(ctx context.Context) (syncErr error) {
 			return err
 		}
 		var applyErr error
+		if c.core == nil && c.hysteria != nil {
+			if c.identity.DesiredState.Exit != nil || len(c.identity.DesiredState.TransitOutbounds) > 0 {
+				applyErr = errors.New("该机器缺少 Xray 内核")
+			}
+			for _, n := range c.identity.DesiredState.Nodes {
+				if n.Enabled && (n.Extension == nil || n.Extension.Kind != "hysteria2_tls") {
+					applyErr = errors.New("该机器缺少 Xray 内核")
+				}
+			}
+		}
+		if c.hysteria != nil {
+			if applyErr == nil {
+				applyErr = c.hysteria.Apply(ctx, c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest, c.identity.DesiredState)
+			}
+		}
 		if c.core != nil {
-			applyErr = c.core.Apply(ctx, c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest, c.identity.DesiredState)
+			if applyErr == nil {
+				applyErr = c.core.Apply(ctx, c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest, c.identity.DesiredState)
+			}
 		}
 		statusErr := c.reportStatus(ctx)
 		var trafficErr error
 		if c.core != nil {
 			trafficErr = c.core.Sample(ctx)
+		}
+		if c.hysteria != nil {
+			trafficErr = errors.Join(trafficErr, c.hysteria.Sample(ctx))
 		}
 		if applyErr == nil && statusErr == nil && c.identity.DesiredState.TrafficReportingEnabled {
 			trafficErr = errors.Join(trafficErr, c.syncTraffic(ctx))
@@ -339,6 +395,22 @@ func (c *Client) reportStatus(ctx context.Context) error {
 			request.RestrictionAppliedAt = status.RestrictionAppliedAt.UTC().Format(time.RFC3339Nano)
 		}
 		request.Applied = status.Running && status.AuthorityEpoch == c.identity.AuthorityEpoch && status.Revision == c.identity.Revision && status.Digest == c.identity.Digest
+		if c.hysteria != nil {
+			request.Applied = request.Applied && c.hysteria.Matches(c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest)
+		}
+		request.ApplyError = status.Error
+		if !request.Applied && request.ApplyError == "" {
+			request.ApplyError = protocol.ErrorCorePending
+		}
+	} else if c.hysteria != nil {
+		status := c.hysteria.Status()
+		request.CoreGeneration, request.CoreInstanceID = status.Generation, status.InstanceID
+		request.AppliedAuthorityEpoch, request.AppliedRevision, request.AppliedDigest = status.AuthorityEpoch, status.Revision, status.Digest
+		request.AppliedRestrictionDigest = status.RestrictionDigest
+		if !status.RestrictionAppliedAt.IsZero() {
+			request.RestrictionAppliedAt = status.RestrictionAppliedAt.UTC().Format(time.RFC3339Nano)
+		}
+		request.Applied = !requiresXray(c.identity.DesiredState) && c.hysteria.Matches(c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest)
 		request.ApplyError = status.Error
 		if !request.Applied && request.ApplyError == "" {
 			request.ApplyError = protocol.ErrorCorePending
@@ -356,6 +428,18 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		return c.store.Save(c.identity)
 	}
 	return errors.New("Panel returned an invalid heartbeat time")
+}
+
+func requiresXray(state protocol.DesiredState) bool {
+	if state.Exit != nil || len(state.TransitOutbounds) > 0 {
+		return true
+	}
+	for _, node := range state.Nodes {
+		if node.Enabled && (node.Extension == nil || node.Extension.Kind != "hysteria2_tls") {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, request any, bearer string, response any) (int, error) {
@@ -406,7 +490,7 @@ func (c *Client) postJSON(ctx context.Context, path string, request any, bearer 
 }
 
 func (c *Client) Run(ctx context.Context) error {
-	if c.core != nil {
+	if c.core != nil || c.hysteria != nil {
 		measureCtx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		go func() { defer close(done); c.runSampler(measureCtx) }()

@@ -286,7 +286,7 @@ func (s *Store) populateNodeExtension(ctx context.Context, query interface {
 	if err != nil {
 		return err
 	}
-	node.ExtensionKind = pkg.Renderers.Xray.Kind
+	node.ExtensionKind = extensions.RendererKind(pkg)
 	node.ExtensionSNI = publicConfig["sni"]
 	return nil
 }

@@ -79,6 +79,7 @@ type CoreManager struct {
 	state               coreJournal
 	developmentLoopback bool
 	ledger              *ledger.Store
+	hysteriaConfigured  bool
 	// Used only by subprocess tests to interrupt durable upgrade phases.
 	upgradeCheckpoint func(string)
 }

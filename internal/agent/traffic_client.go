@@ -51,7 +51,13 @@ func (c *Client) runSampler(ctx context.Context) {
 			}
 			nextDiskCheck = time.Now().Add(time.Minute)
 		}
-		err := c.core.Sample(ctx)
+		var err error
+		if c.core != nil {
+			err = c.core.Sample(ctx)
+		}
+		if c.hysteria != nil {
+			err = errors.Join(err, c.hysteria.Sample(ctx), c.hysteria.Reconcile(ctx))
+		}
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !failed {
 				log.Print("流量采样未提交，保留原水位并重试；请检查账本诊断与可用磁盘。")
@@ -61,7 +67,12 @@ func (c *Client) runSampler(ctx context.Context) {
 			log.Print("流量采样已恢复")
 			failed = false
 		}
-		wait := c.core.nextSample()
+		wait := 5 * time.Second
+		if c.core != nil {
+			wait = c.core.nextSample()
+		} else if next := c.ledger.NextBoundary(ctx); !next.IsZero() {
+			wait = min(wait, max(time.Until(next), 100*time.Millisecond))
+		}
 		if failed {
 			wait = max(wait, 5*time.Second)
 		}

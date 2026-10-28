@@ -37,3 +37,20 @@ func TestSubscriptionProjectionUsesTrojanExtensionRenderer(t *testing.T) {
 		t.Fatalf("Trojan extension Mihomo projection = %#v", proxy)
 	}
 }
+
+func TestHysteriaSubscriptionUsesPublicUDPPortAndCertificateVerification(t *testing.T) {
+	n := subscriptionNode{ID: "hy2-node", Name: "hy2", Host: "edge.example.test", Port: 45123, ExtensionKind: "hysteria2_tls", ExtensionSNI: "tls.example.test"}
+	uri := nodeURI(n, "credential")
+	if !strings.HasPrefix(uri, "hysteria2://credential@edge.example.test:45123/") || !strings.Contains(uri, "sni=tls.example.test") || !strings.Contains(uri, "insecure=0") {
+		t.Fatal(uri)
+	}
+	proxy := mihomoProxy(n, "credential")
+	if proxy["type"] != "hysteria2" || proxy["port"] != 45123 || proxy["skip-cert-verify"] != false {
+		t.Fatal(proxy)
+	}
+	for _, field := range []string{"private_key", "certificate_pem", "machine_id", "exit_machine_id"} {
+		if _, exists := proxy[field]; exists {
+			t.Fatalf("leaked %s", field)
+		}
+	}
+}

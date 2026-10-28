@@ -107,6 +107,33 @@ func testPackage() Package {
 	}
 }
 
+func TestOfficialHysteriaDeclarationAndSubscriptions(t *testing.T) {
+	pkg := testPackage()
+	pkg.Manifest.ID = "official-hysteria2"
+	pkg.Manifest.Core = CoreSupport{Kind: "hysteria", MinVersion: "2.13.0"}
+	pkg.Renderers.Xray = XrayRenderer{}
+	pkg.Renderers.Hysteria = &HysteriaRenderer{Kind: "hysteria2_tls", Version: 2}
+	pkg.Renderers.URI.Kind = "hysteria2_tls"
+	pkg.Renderers.Mihomo.Kind = "hysteria2_tls"
+	cert, key := testCertificate(t)
+	node, err := CompileNode(pkg, map[string]string{"sni": "edge.example.test", "certificate_pem": cert, "private_key_pem": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := RenderURI(pkg, "hy2", "2001:db8::1", 45002, "a:b@secret", node)
+	if err != nil || !strings.HasPrefix(uri, "hysteria2://a%3Ab%40secret@[2001:db8::1]:45002/") || !strings.Contains(uri, "insecure=0") {
+		t.Fatalf("URI %s: %v", uri, err)
+	}
+	proxy, err := RenderMihomo(pkg, "hy2", "edge.example.test", 45002, "secret", node)
+	if err != nil || proxy["type"] != "hysteria2" || proxy["skip-cert-verify"] != false {
+		t.Fatalf("proxy %#v: %v", proxy, err)
+	}
+	pkg.Renderers.Xray = XrayRenderer{Kind: "trojan_tls", Protocol: "trojan", Network: "tcp", TLS: true}
+	if err := Validate(pkg); err == nil {
+		t.Fatal("simultaneous conflicting Core renderers accepted")
+	}
+}
+
 func testCertificate(t *testing.T) (string, string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

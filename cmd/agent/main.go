@@ -220,6 +220,7 @@ func runSync(args []string) error {
 	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
 	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
 	xrayPath := flags.String("xray-path", "", "absolute path to the verified supported Xray binary")
+	hysteriaPath := flags.String("hysteria-path", "", "absolute path to official Hysteria v2.13.0")
 	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("用法：control-agent sync [--data-dir PATH] [--ca-cert PEM] [--xray-path PATH]")
@@ -229,15 +230,15 @@ func runSync(args []string) error {
 		return err
 	}
 	defer client.Close()
-	if *xrayPath != "" {
-		if err := client.EnableCore(context.Background(), *xrayPath, *developmentLoopback); err != nil {
+	if *xrayPath != "" || *hysteriaPath != "" {
+		if err := client.EnableCores(context.Background(), *xrayPath, *hysteriaPath, *developmentLoopback); err != nil {
 			return err
 		}
 	}
 	if err := client.SyncOnce(context.Background()); err != nil {
 		return err
 	}
-	if *xrayPath == "" {
+	if *xrayPath == "" && *hysteriaPath == "" {
 		fmt.Fprintln(os.Stdout, "已同步配置并上报状态；未启用 Core 管理，未报告 applied 成功。")
 	} else {
 		fmt.Fprintln(os.Stdout, "已同步配置、完成 Core 应用与健康检查并上报状态。")
@@ -251,6 +252,7 @@ func runAgent(args []string) error {
 	dataDir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
 	caCert := flags.String("ca-cert", "", "additional PEM CA certificate")
 	xrayPath := flags.String("xray-path", "", "absolute path to the verified supported Xray binary")
+	hysteriaPath := flags.String("hysteria-path", "", "absolute path to official Hysteria v2.13.0")
 	developmentLoopback := flags.Bool("development-loopback-test", false, "allow pure development Nodes to reach only TCP 127.0.0.1:18080 and UDP 127.0.0.1:18081")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("用法：control-agent run [--data-dir PATH] [--ca-cert PEM] [--xray-path PATH]")
@@ -262,8 +264,8 @@ func runAgent(args []string) error {
 	defer client.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if *xrayPath != "" {
-		if err := client.EnableCore(ctx, *xrayPath, *developmentLoopback); err != nil {
+	if *xrayPath != "" || *hysteriaPath != "" {
+		if err := client.EnableCores(ctx, *xrayPath, *hysteriaPath, *developmentLoopback); err != nil {
 			return err
 		}
 	}

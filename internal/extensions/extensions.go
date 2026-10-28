@@ -83,9 +83,22 @@ type Field struct {
 }
 
 type Renderers struct {
-	Xray   XrayRenderer         `json:"xray"`
-	URI    SubscriptionRenderer `json:"uri"`
-	Mihomo SubscriptionRenderer `json:"mihomo"`
+	Xray     XrayRenderer         `json:"xray"`
+	Hysteria *HysteriaRenderer    `json:"hysteria,omitempty"`
+	URI      SubscriptionRenderer `json:"uri"`
+	Mihomo   SubscriptionRenderer `json:"mihomo"`
+}
+
+type HysteriaRenderer struct {
+	Kind    string `json:"kind"`
+	Version int    `json:"version"`
+}
+
+func RendererKind(pkg Package) string {
+	if pkg.Renderers.Hysteria != nil {
+		return pkg.Renderers.Hysteria.Kind
+	}
+	return pkg.Renderers.Xray.Kind
 }
 
 type XrayRenderer struct {
@@ -142,16 +155,21 @@ func Validate(pkg Package) error {
 	if !safeText(pkg.Manifest.Name, 128) || !safeText(pkg.Manifest.Description, 512) {
 		return fmt.Errorf("%w：名称或说明无效", ErrInvalidPackage)
 	}
-	if pkg.Manifest.Core.Kind != "xray" || !supportedCoreMinVersion(pkg.Manifest.Core.MinVersion) {
+	hy2 := pkg.Renderers.Hysteria != nil
+	if !hy2 && (pkg.Manifest.Core.Kind != "xray" || !supportedCoreMinVersion(pkg.Manifest.Core.MinVersion)) || hy2 && (pkg.Manifest.Core.Kind != "hysteria" || pkg.Manifest.Core.MinVersion != "2.13.0") {
 		return fmt.Errorf("%w：Core 兼容范围无效", ErrInvalidPackage)
 	}
 	if pkg.Manifest.Capabilities.OneHop || pkg.Manifest.Capabilities.SingBox || !pkg.Manifest.Capabilities.Direct || !pkg.Manifest.Capabilities.URI || !pkg.Manifest.Capabilities.Mihomo || !pkg.Manifest.Capabilities.Certificate {
 		return fmt.Errorf("%w：声明了运行时不支持的能力", ErrInvalidPackage)
 	}
-	if pkg.Renderers.Xray.Kind != "trojan_tls" || pkg.Renderers.Xray.Protocol != "trojan" || pkg.Renderers.Xray.Network != "tcp" || !pkg.Renderers.Xray.TLS {
+	if hy2 {
+		if pkg.Renderers.Xray != (XrayRenderer{}) || pkg.Renderers.Hysteria.Kind != "hysteria2_tls" || pkg.Renderers.Hysteria.Version != 2 {
+			return fmt.Errorf("%w：Hysteria renderer 不在白名单内", ErrInvalidPackage)
+		}
+	} else if pkg.Renderers.Xray.Kind != "trojan_tls" || pkg.Renderers.Xray.Protocol != "trojan" || pkg.Renderers.Xray.Network != "tcp" || !pkg.Renderers.Xray.TLS {
 		return fmt.Errorf("%w：Xray renderer 不在白名单内", ErrInvalidPackage)
 	}
-	if pkg.Renderers.URI.Kind != "trojan_tls" || !pkg.Renderers.URI.Enabled || pkg.Renderers.Mihomo.Kind != "trojan_tls" || !pkg.Renderers.Mihomo.Enabled {
+	if pkg.Renderers.URI.Kind != RendererKind(pkg) || !pkg.Renderers.URI.Enabled || pkg.Renderers.Mihomo.Kind != RendererKind(pkg) || !pkg.Renderers.Mihomo.Enabled {
 		return fmt.Errorf("%w：订阅 renderer 不完整", ErrInvalidPackage)
 	}
 	if len(pkg.Schema.Fields) != 3 {
@@ -308,7 +326,7 @@ func CompileNode(pkg Package, values map[string]string) (CompiledNode, error) {
 	if err != nil || !samePublicKey(certificate, privateKey) {
 		return CompiledNode{}, fmt.Errorf("%w：私钥字段无效", ErrInvalidPackage)
 	}
-	return CompiledNode{ID: pkg.Manifest.ID, Version: pkg.Manifest.Version, Kind: pkg.Renderers.Xray.Kind, SNI: sni, CertificatePEM: values["certificate_pem"], PrivateKeyPEM: values["private_key_pem"]}, nil
+	return CompiledNode{ID: pkg.Manifest.ID, Version: pkg.Manifest.Version, Kind: RendererKind(pkg), SNI: sni, CertificatePEM: values["certificate_pem"], PrivateKeyPEM: values["private_key_pem"]}, nil
 }
 
 func parseCertificate(value string) (*x509.Certificate, error) {
@@ -351,16 +369,23 @@ func publicKeyEqual(a, b any) bool {
 }
 
 func RenderURI(pkg Package, name, host string, port int, password string, node CompiledNode) (string, error) {
-	if err := Validate(pkg); err != nil || pkg.Renderers.URI.Kind != "trojan_tls" {
+	if err := Validate(pkg); err != nil || node.Kind != RendererKind(pkg) {
 		return "", fmt.Errorf("%w：URI renderer 不可用", ErrInvalidPackage)
+	}
+	if node.Kind == "hysteria2_tls" {
+		u := url.URL{Scheme: "hysteria2", User: url.User(password), Host: net.JoinHostPort(host, strconv.Itoa(port)), Path: "/", RawQuery: url.Values{"sni": {node.SNI}, "insecure": {"0"}}.Encode(), Fragment: name}
+		return u.String(), nil
 	}
 	u := url.URL{Scheme: "trojan", User: url.User(password), Host: net.JoinHostPort(host, fmt.Sprintf("%d", port)), RawQuery: url.Values{"security": {"tls"}, "sni": {node.SNI}, "allowInsecure": {"0"}, "type": {"tcp"}}.Encode(), Fragment: name}
 	return u.String(), nil
 }
 
 func RenderMihomo(pkg Package, name, host string, port int, password string, node CompiledNode) (map[string]any, error) {
-	if err := Validate(pkg); err != nil || pkg.Renderers.Mihomo.Kind != "trojan_tls" {
+	if err := Validate(pkg); err != nil || node.Kind != RendererKind(pkg) {
 		return nil, fmt.Errorf("%w：Mihomo renderer 不可用", ErrInvalidPackage)
+	}
+	if node.Kind == "hysteria2_tls" {
+		return map[string]any{"name": name, "type": "hysteria2", "server": host, "port": port, "password": password, "sni": node.SNI, "skip-cert-verify": false}, nil
 	}
 	return map[string]any{"name": name, "type": "trojan", "server": host, "port": port, "password": password, "sni": node.SNI, "tls": true, "udp": false}, nil
 }

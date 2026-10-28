@@ -2,6 +2,7 @@ package xray
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"sort"
 	"strconv"
@@ -58,6 +59,9 @@ func renderConfig(state protocol.DesiredState, developmentLoopback bool) (Render
 	result := RenderedConfig{Mappings: []StatMapping{}, Listeners: []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(protocol.CoreStatsPort))}}
 	result.Bindings = append([]string{}, result.Listeners...)
 	for _, node := range nodes {
+		if node.Extension != nil && node.Extension.Kind != "trojan_tls" {
+			return RenderedConfig{}, errors.New("该协议需要独立官方内核，不能交给 Xray")
+		}
 		if !node.Enabled || state.QuotaRestrictions.MachineStop {
 			continue
 		}

@@ -33,6 +33,10 @@ func subscriptionNodes(access storage.UserAccess) []subscriptionNode {
 func nodeURIAddress(n subscriptionNode) string { return net.JoinHostPort(n.Host, strconv.Itoa(n.Port)) }
 
 func nodeURI(n subscriptionNode, uuid string) string {
+	if n.ExtensionKind == "hysteria2_tls" {
+		u := url.URL{Scheme: "hysteria2", User: url.User(uuid), Host: nodeURIAddress(n), Path: "/", RawQuery: url.Values{"sni": {n.ExtensionSNI}, "insecure": {"0"}}.Encode(), Fragment: n.Name}
+		return u.String()
+	}
 	if n.ExtensionKind == "trojan_tls" {
 		u := url.URL{Scheme: "trojan", User: url.User(uuid), Host: nodeURIAddress(n), RawQuery: url.Values{"security": {"tls"}, "sni": {n.ExtensionSNI}, "allowInsecure": {"0"}, "type": {"tcp"}}.Encode(), Fragment: n.Name}
 		return u.String()
@@ -48,6 +52,9 @@ func nodeURI(n subscriptionNode, uuid string) string {
 // Rendering a proxy is separate from the import preset (listeners, selection
 // group and routing). JSON is a YAML subset accepted by the native Mihomo CLI.
 func mihomoProxy(n subscriptionNode, uuid string) map[string]any {
+	if n.ExtensionKind == "hysteria2_tls" {
+		return map[string]any{"name": n.Name + " · " + n.ID, "type": "hysteria2", "server": n.Host, "port": n.Port, "password": uuid, "sni": n.ExtensionSNI, "skip-cert-verify": false}
+	}
 	if n.ExtensionKind == "trojan_tls" {
 		return map[string]any{"name": n.Name + " · " + n.ID, "type": "trojan", "server": n.Host, "port": n.Port, "password": uuid, "sni": n.ExtensionSNI, "tls": true, "udp": false}
 	}

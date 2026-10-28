@@ -58,10 +58,24 @@ func (m *CoreManager) persistDesired(digest string, desired protocol.DesiredStat
 }
 
 func (m *CoreManager) renderDesired(desired protocol.DesiredState) (xray.RenderedConfig, error) {
-	if m.developmentLoopback {
-		return xray.RenderDevelopmentConfig(desired)
+	if err := protocol.ValidateDesiredState(desired); err != nil {
+		return xray.RenderedConfig{}, err
 	}
-	return xray.RenderConfig(desired)
+	filtered := desired
+	filtered.Nodes = []protocol.DesiredNode{}
+	for _, node := range desired.Nodes {
+		if node.Extension != nil && node.Extension.Kind == "hysteria2_tls" {
+			if !m.hysteriaConfigured {
+				return xray.RenderedConfig{}, errors.New("该机器尚未配置官方 Hysteria 内核")
+			}
+			continue
+		}
+		filtered.Nodes = append(filtered.Nodes, node)
+	}
+	if m.developmentLoopback {
+		return xray.RenderDevelopmentConfig(filtered)
+	}
+	return xray.RenderConfig(filtered)
 }
 
 // Transport recovery must not undo an already confirmed revocation or secret
