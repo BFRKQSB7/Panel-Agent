@@ -3,12 +3,13 @@
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
 CURRENT MILESTONE: M5 — 运维与发布
-RECOMMENDED NEXT TASK: [D17 — 完整发布回归与资源验收](D17-release-resource-gate.md)（D14/D15 已完成必要实现与验证；先复验当前候选包，再继续真实资源、组合生命周期和长稳门槛）
+RECOMMENDED NEXT TASK: [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md)（用户新增需求；先开发，测试/部署暂缓；D17 保留最终验收）
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
 | Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
 |---|---|---|---|---|---|
+| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 已落实官方独立内核补充契约；先实现回环认证与统计适配，再接入生命周期、账本、Panel 和运维。当前不运行测试或部署；懒猫 UDP 映射待设置，不构成开发阻塞。 |
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | DONE | high | — | 指定且获用户接受的玩具冰岛 128MiB 整机容器 smoke 通过：16 次 Reality 请求/分入口累计 Stats/重启清零；系统采样峰值 64.1MiB，OOM 零，原服务保留；WSL 回归通过。 |
 | [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |
