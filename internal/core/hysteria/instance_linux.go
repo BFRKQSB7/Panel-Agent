@@ -205,6 +205,8 @@ func (i *Instance) Snapshot(ctx context.Context) (map[string]Counter, error) {
 		return nil, err
 	}
 	select {
+	case <-i.stopping:
+		return nil, errors.New("hysteria: instance stopped during sampling")
 	case <-i.done:
 		return nil, errors.New("hysteria: instance exited during sampling")
 	default:
