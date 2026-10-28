@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"panel-agent.local/panel-agent/internal/core/hysteria"
 	"panel-agent.local/panel-agent/internal/period"
 	"panel-agent.local/panel-agent/internal/protocol"
+	"panel-agent.local/panel-agent/internal/security"
 	"panel-agent.local/panel-agent/internal/storage"
 )
 
@@ -21,6 +24,42 @@ type hysteriaSession struct {
 	mu       sync.Mutex
 	instance *hysteria.Instance
 	source   *hysteriaSource
+}
+
+// recoverHysteriaSessions runs once before any new auth listener or instance is
+// started. A new Agent never adopts a former process's unproven counter source.
+func recoverHysteriaSessions(ctx context.Context, dir string, book *ledger.Store, binary string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "hysteria-source-") || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "hysteria-source-"), ".json")
+		if !security.IsUUIDv4(id) {
+			return errors.New("hysteria: unexpected source journal name")
+		}
+		if err := hysteria.StopOrphans(ctx, binary, filepath.Join(dir, "hysteria", id)); err != nil {
+			return err
+		}
+		source, err := loadHysteriaSource(ctx, filepath.Join(dir, entry.Name()), book)
+		if err != nil {
+			return err
+		}
+		at := time.Now().UTC()
+		if at.Before(source.state.LastAt) {
+			at = source.state.LastAt
+		}
+		if err := source.recoverStopped(ctx, at); err != nil {
+			return err
+		}
+		if err := source.retire(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func startHysteriaSession(ctx context.Context, dir string, book *ledger.Store, binary string, node protocol.DesiredNode, policies []period.Policy, restrictions protocol.QuotaRestrictions, options hysteria.ServerOptions, generation uint64) (*hysteriaSession, error) {

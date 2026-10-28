@@ -149,6 +149,32 @@ func TestOfficialInstanceLifecycle(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("expiry left child running")
 	}
+	orphan, err := StartInstance(ctx, binary, opts, []Account{{ID: "user-node", Secret: testSecret}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup, c := context.WithTimeout(context.Background(), time.Second)
+		defer c()
+		_ = orphan.Stop(cleanup)
+	})
+	otherDir := t.TempDir()
+	if err := os.Chmod(otherDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := StopOrphans(ctx, binary, otherDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orphan.Snapshot(ctx); err != nil {
+		t.Fatal("recovery stopped a different instance")
+	}
+	if err := StopOrphans(ctx, binary, opts.InstanceDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := orphan.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("orphan recovery stopped only the exact managed config")
 }
 
 func TestStartRejectsExecutableSymlinkWithoutLaunching(t *testing.T) {

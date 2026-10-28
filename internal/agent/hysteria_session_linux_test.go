@@ -107,4 +107,23 @@ func TestHysteriaSessionLedgerFailureStopsOfficialCore(t *testing.T) {
 		t.Fatal("failed ledger observation lost")
 	}
 	t.Log("ledger failure stopped official child and retained pending observation")
+	reopened, err := ledger.Open(dir, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := recoverHysteriaSessions(ctx, dir, reopened, binary); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(session.source.path); !os.IsNotExist(err) {
+		t.Fatal("recovered journal not retired")
+	}
+	diagnostic, err := reopened.Diagnostic(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnostic.Sources != 0 {
+		t.Fatal("recovered counter source leaked")
+	}
+	t.Log("restart replayed pending observation and retired only the stopped source")
 }
