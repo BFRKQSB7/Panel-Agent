@@ -1,0 +1,20 @@
+{
+  "manifest": {
+    "id": "official-hysteria2",
+    "version": "1.0.0",
+    "name": "Hysteria 2 官方内核",
+    "description": "官方 Hysteria 2 的 UDP/QUIC 直连入口，使用有效 TLS 证书；支持 URI 与 Mihomo。",
+    "core": {"kind": "hysteria", "min_version": "2.13.0"},
+    "capabilities": {"direct": true, "one_hop": false, "uri": true, "mihomo": true, "sing_box": false, "certificate": true}
+  },
+  "schema": {"fields": [
+    {"name": "sni", "type": "host", "label": "TLS SNI", "required": true, "secret": false, "max": 253},
+    {"name": "certificate_pem", "type": "pem", "label": "TLS 证书 PEM", "required": true, "secret": true, "max": 65536},
+    {"name": "private_key_pem", "type": "private_key_pem", "label": "TLS 私钥 PEM", "required": true, "secret": true, "max": 65536}
+  ]},
+  "renderers": {
+    "hysteria": {"kind": "hysteria2_tls", "version": 2},
+    "uri": {"kind": "hysteria2_tls", "enabled": true},
+    "mihomo": {"kind": "hysteria2_tls", "enabled": true}
+  }
+}

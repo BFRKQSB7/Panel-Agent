@@ -27,6 +27,19 @@ func testProbeNode(host string, port int) storage.NodeRecord {
 	return storage.NodeRecord{NodeID: "00000000-0000-4000-8000-000000000001", NodeInput: storage.NodeInput{PublicHost: host, PublicPort: port}}
 }
 
+func TestHysteriaGuideUsesUDPAndDoesNotAdvertiseTCPProbe(t *testing.T) {
+	n := storage.NodeRecord{NodeID: "hy2", ExtensionKind: "hysteria2_tls", ExtensionSNI: "hy2.example.test", NodeInput: storage.NodeInput{PublicHost: "edge.example.test", PublicPort: 45123, ListenHost: "10.0.0.2", ListenPort: 24443}}
+	guide := makeNodeGuide("machine", n, protocol.MachineView{})
+	if !guide.UDPOnly || guide.LocalProbe || !strings.Contains(guide.NAT[0].Text, "公网 UDP edge.example.test:45123 -> 本机 UDP 10.0.0.2:24443") {
+		t.Fatalf("incorrect UDP guide: %+v", guide)
+	}
+	for _, step := range guide.Protocol {
+		if strings.Contains(step.Text, "REALITY") || strings.Contains(step.Text, "Short ID") {
+			t.Fatal("hy2 inherited Reality-only client fields")
+		}
+	}
+}
+
 func TestNodeGuideUsesCurrentIPv4IPv6AndDomainValues(t *testing.T) {
 	machine := protocol.MachineView{}
 	v4 := makeNodeGuide("00000000-0000-4000-8000-000000000010", storage.NodeRecord{NodeID: "node-v4", NodeInput: storage.NodeInput{PublicHost: "198.51.100.20", PublicPort: 45001, ListenHost: "10.0.0.8", ListenPort: 18443, ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443"}, PublicKey: "public-v4", ShortID: "0123456789abcdef"}, machine)

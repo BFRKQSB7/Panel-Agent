@@ -22,9 +22,16 @@ if [ "$role" = control ]; then
 fi
 
 test -x "$release_dir/control-agent"
-test -x "$release_dir/xray"
+if [ -x "$release_dir/hysteria" ]; then
+    set -- --hysteria-bin "$release_dir/hysteria" "$@"
+fi
+if [ -x "$release_dir/xray" ]; then
+    set -- --xray-bin "$release_dir/xray" "$@"
+elif [ ! -x "$release_dir/hysteria" ]; then
+    echo "release requires xray or hysteria" >&2
+    exit 1
+fi
 exec "$release_dir/panel-agent-installer" install \
     --control-bin "$release_dir/control" \
     --agent-bin "$release_dir/control-agent" \
-    --xray-bin "$release_dir/xray" \
     "$@"

@@ -38,6 +38,7 @@ type nodeGuide struct {
 	ProbeStatus string
 	ProbePath   string
 	LocalProbe  bool
+	UDPOnly     bool
 	PublicHost  string
 	PublicPort  int
 	ListenHost  string
@@ -65,6 +66,15 @@ func makeNodeGuide(machineID string, node storage.NodeRecord, machine protocol.M
 		ListenHost:  node.ListenHost,
 		ListenPort:  node.ListenPort,
 	}
+	if node.ExtensionKind == "hysteria2_tls" {
+		guide.UDPOnly = true
+		guide.LocalProbe = false
+		guide.NAT = []guideStep{{Label: "UDP 端口映射", Text: fmt.Sprintf("公网 UDP %s -> 本机 UDP %s；公网与本地端口分别填写，不使用 TCP 映射替代。", publicEndpoint, listenEndpoint)}}
+		guide.Protocol = []guideStep{{Label: "协议", Text: fmt.Sprintf("Hysteria 2 官方内核；UDP/QUIC；公网入口=%s；TLS SNI=%s", publicEndpoint, node.ExtensionSNI)}, {Label: "证书", Text: "上传与 TLS SNI 匹配的有效证书和私钥；客户端默认校验证书。NAT 端口映射不改变 SNI，证书私钥不进入用户订阅。"}, {Label: "验证方式", Text: "使用官方 hy2 或 Mihomo 客户端验证 QUIC 握手、TCP/UDP 业务与流量入账；普通 TCP 建连和 UDP socket 创建均不能证明公网 hy2 可用。"}}
+		guide.ProbeStatus = "此节点为 UDP/QUIC，当前有限 TCP 检查不适用；请使用真实 hy2 客户端验收。"
+	} else if node.ExtensionKind == "trojan_tls" {
+		guide.Protocol = []guideStep{{Label: "协议", Text: fmt.Sprintf("Trojan/TCP/TLS；公网入口=%s；TLS SNI=%s", publicEndpoint, node.ExtensionSNI)}, {Label: "证书", Text: "上传与 SNI 匹配的证书及私钥；客户端校验证书，订阅不包含服务端私钥。"}}
+	}
 	if machine.LastHeartbeat != "" {
 		guide.AgentStatus = "最近收到 Agent 心跳：" + machine.LastHeartbeat + "；心跳在线不代表公网入口可达"
 	}
@@ -86,7 +96,7 @@ func makeNodeGuide(machineID string, node storage.NodeRecord, machine protocol.M
 		guide.DNS = append(guide.DNS,
 			guideStep{Label: "A 记录", Text: fmt.Sprintf("A %s -> <已确认的公网 IPv4>；A/AAAA 记录不携带端口", node.PublicHost)},
 			guideStep{Label: "AAAA 记录", Text: fmt.Sprintf("AAAA %s -> <已确认的公网 IPv6>；没有 IPv6 时不要伪造 AAAA", node.PublicHost)},
-			guideStep{Label: "DNS 代理", Text: "若使用 Cloudflare，Reality 节点默认选择 DNS only；不要为兼容性教程默认打开 CDN/代理，先确认实际协议支持。"},
+			guideStep{Label: "DNS 代理", Text: "若使用 Cloudflare，当前协议选择 DNS only；普通 CDN/HTTP 代理不能直接承载当前入口。"},
 		)
 	}
 	return guide

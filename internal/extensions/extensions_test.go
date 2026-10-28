@@ -108,6 +108,13 @@ func testPackage() Package {
 }
 
 func TestOfficialHysteriaDeclarationAndSubscriptions(t *testing.T) {
+	data, err := os.ReadFile("../../examples/extensions/official-hysteria2/package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseJSON(data); err != nil {
+		t.Fatal(err)
+	}
 	pkg := testPackage()
 	pkg.Manifest.ID = "official-hysteria2"
 	pkg.Manifest.Core = CoreSupport{Kind: "hysteria", MinVersion: "2.13.0"}

@@ -11,4 +11,5 @@ cp -R "$source_dir/." "$run/"
 find "$run" -type f -exec chmod 644 {} +
 find "$run" -type d -exec chmod 755 {} +
 chmod 755 "$run/control" "$run/control-agent" "$run/panel-agent-installer" "$run/xray" "$run/install.sh" "$run/uninstall.sh" "$run/cleanup.sh"
+if [ -f "$run/hysteria" ]; then chmod 755 "$run/hysteria"; fi
 tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "$archive" -C "$run" .

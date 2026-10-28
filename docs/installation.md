@@ -26,6 +26,8 @@ sudo systemctl start panel-agent-agent
 
 ## 所有权清单
 
+hy2 可选安装见 [官方 Hysteria 2](hysteria2.md)。安装器接受 `--hysteria-bin` 并校验固定官方资产；只有该内核时生成 hy2-only 服务。打包脚本增加可选 `-HysteriaAmd64Binary`、`-HysteriaArm64Binary` 和 `-HysteriaLicense`，必须一起提供；包内包含二进制、许可证及可导入的 `protocol-extensions/official-hysteria2.zip`。
+
 每个角色在自己的数据根保存 `ownership.json`，记录规范化路径、角色、来源、类型和普通卸载/`--purge` 行为。control 和 agent 使用分离的数据根，因此共机卸载 Panel 不会删除 Agent 的未 ACK 账本；外部 Core 永远不进入可删除路径清单。安装重跑只替换清单已声明且仍为普通文件的项目文件，发现同名外部文件、符号链接、路径逃逸或清单被篡改会拒绝继续。
 
 安装、卸载和清理使用项目数据根下的进程锁串行。数据目录和秘密文件使用受限权限与原子替换；systemd unit、程序入口和日志路径按精确文件处理，不递归删除 `/opt`、`/etc` 或 `/var` 父目录。卸载前会验证 unit 仍带有 Panel-Agent 所有权标记；入口符号链接只解除链接，不会删除其指向的外部目标。

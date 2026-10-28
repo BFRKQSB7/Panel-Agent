@@ -66,6 +66,10 @@ func (s *Server) handleNodeConnectivityCheck(w http.ResponseWriter, r *http.Requ
 		writeJSONError(w, http.StatusNotFound, "节点不存在")
 		return
 	}
+	if node.ExtensionKind == "hysteria2_tls" {
+		writeJSONError(w, http.StatusUnprocessableEntity, "hy2 使用 UDP/QUIC，请使用真实客户端验证；TCP 检查不适用。")
+		return
+	}
 	result := runConnectivityProbe(r.Context(), node, request.Mode)
 	if result.DNS.Status == "rejected" {
 		writeJSON(w, http.StatusUnprocessableEntity, result)

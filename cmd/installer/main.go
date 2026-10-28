@@ -39,18 +39,19 @@ func run(args []string) error {
 }
 
 type commonFlags struct {
-	role          string
-	projectRoot   string
-	dataRoot      string
-	logRoot       string
-	systemdDir    string
-	controlBinary string
-	agentBinary   string
-	xrayBinary    string
-	coreOwner     string
-	serviceUser   string
-	serviceGroup  string
-	controlListen string
+	role           string
+	projectRoot    string
+	dataRoot       string
+	logRoot        string
+	systemdDir     string
+	controlBinary  string
+	agentBinary    string
+	xrayBinary     string
+	hysteriaBinary string
+	coreOwner      string
+	serviceUser    string
+	serviceGroup   string
+	controlListen  string
 }
 
 func (f *commonFlags) bind(flags *flag.FlagSet, role install.Role) {
@@ -63,6 +64,7 @@ func (f *commonFlags) bind(flags *flag.FlagSet, role install.Role) {
 	flags.StringVar(&f.controlBinary, "control-bin", "", "verified control binary source")
 	flags.StringVar(&f.agentBinary, "agent-bin", "", "verified control-agent binary source")
 	flags.StringVar(&f.xrayBinary, "xray-bin", "", "verified Xray binary source or external path")
+	flags.StringVar(&f.hysteriaBinary, "hysteria-bin", "", "official Hysteria v2.13.0 binary source")
 	flags.StringVar(&f.coreOwner, "core-owner", string(defaults.CoreOwner), "project or external")
 	flags.StringVar(&f.serviceUser, "service-user", defaults.ServiceUser, "system service user")
 	flags.StringVar(&f.serviceGroup, "service-group", defaults.ServiceGroup, "system service group")
@@ -72,8 +74,11 @@ func (f *commonFlags) bind(flags *flag.FlagSet, role install.Role) {
 func (f commonFlags) options() (install.Options, error) {
 	options := install.Options{
 		Role: install.Role(f.role), ProjectRoot: f.projectRoot, DataRoot: f.dataRoot, LogRoot: f.logRoot, SystemdDir: f.systemdDir,
-		ControlBinary: f.controlBinary, AgentBinary: f.agentBinary, XrayBinary: f.xrayBinary, CoreOwner: install.CoreOwner(f.coreOwner),
+		ControlBinary: f.controlBinary, AgentBinary: f.agentBinary, XrayBinary: f.xrayBinary, HysteriaBinary: f.hysteriaBinary, CoreOwner: install.CoreOwner(f.coreOwner),
 		ServiceUser: f.serviceUser, ServiceGroup: f.serviceGroup, ControlListen: f.controlListen,
+	}
+	if options.HysteriaBinary != "" && options.XrayBinary == "" {
+		options.CoreOwner = install.CoreNone
 	}
 	return install.NormalizeOptions(options)
 }
@@ -99,11 +104,11 @@ func runInstall(args []string) error {
 			return errors.New("control-only 安装需要 --control-bin")
 		}
 	} else if options.Role == install.RoleAgent {
-		if options.AgentBinary == "" || options.XrayBinary == "" {
-			return errors.New("agent-only 安装需要 --agent-bin 和 --xray-bin")
+		if options.AgentBinary == "" || options.XrayBinary == "" && options.HysteriaBinary == "" {
+			return errors.New("agent-only 安装需要 --agent-bin 及 --xray-bin 或 --hysteria-bin")
 		}
-	} else if options.Role == install.RolePanelAgent && (options.ControlBinary == "" || options.AgentBinary == "" || options.XrayBinary == "") {
-		return errors.New("Panel+Agent 安装需要 --control-bin、--agent-bin 和 --xray-bin")
+	} else if options.Role == install.RolePanelAgent && (options.ControlBinary == "" || options.AgentBinary == "" || options.XrayBinary == "" && options.HysteriaBinary == "") {
+		return errors.New("Panel+Agent 安装需要 --control-bin、--agent-bin 和至少一个内核")
 	}
 	if err := ensureServiceAccount(options.ServiceUser, options.ServiceGroup, options.DataRoot); err != nil {
 		return err
@@ -112,7 +117,7 @@ func runInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := chownServiceRoots(options); err != nil {
+	if err := chownServiceRoots(options, result.Manifests...); err != nil {
 		return err
 	}
 	names, _ := install.ServiceNames(options.Role)
@@ -227,7 +232,7 @@ func ensureServiceAccount(serviceUser, serviceGroup, dataRoot string) error {
 	return nil
 }
 
-func chownServiceRoots(options install.Options) error {
+func chownServiceRoots(options install.Options, manifests ...install.Manifest) error {
 	paths := []string{options.DataRoot, options.LogRoot}
 	for _, role := range []install.Role{install.RoleControl, install.RoleAgent} {
 		if options.Role != install.RolePanelAgent && options.Role != role {
@@ -243,6 +248,11 @@ func chownServiceRoots(options install.Options) error {
 			paths = append(paths, filepath.Dir(install.RuntimeCorePath(options)), install.RuntimeCorePath(options))
 		}
 		paths = append(paths, options.LogRoot+string(os.PathSeparator)+string(role)+".log")
+	}
+	for _, manifest := range manifests {
+		if manifest.Hysteria != nil {
+			paths = append(paths, filepath.Dir(manifest.Hysteria.Path), manifest.Hysteria.Path)
+		}
 	}
 	for _, path := range paths {
 		command := exec.Command("chown", options.ServiceUser+":"+options.ServiceGroup, path)

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"panel-agent.local/panel-agent/internal/core/hysteria"
 	"panel-agent.local/panel-agent/internal/storage"
 )
 
@@ -54,21 +55,23 @@ type CoreOwner string
 const (
 	CoreProject  CoreOwner = "project"
 	CoreExternal CoreOwner = "external"
+	CoreNone     CoreOwner = "none"
 )
 
 type Options struct {
-	Role          Role
-	ProjectRoot   string
-	DataRoot      string
-	LogRoot       string
-	SystemdDir    string
-	ControlBinary string
-	AgentBinary   string
-	XrayBinary    string
-	CoreOwner     CoreOwner
-	ServiceUser   string
-	ServiceGroup  string
-	ControlListen string
+	Role           Role
+	ProjectRoot    string
+	DataRoot       string
+	LogRoot        string
+	SystemdDir     string
+	ControlBinary  string
+	AgentBinary    string
+	XrayBinary     string
+	HysteriaBinary string
+	CoreOwner      CoreOwner
+	ServiceUser    string
+	ServiceGroup   string
+	ControlListen  string
 }
 
 type PathOwnership struct {
@@ -94,6 +97,7 @@ type Manifest struct {
 	LogRoot     string          `json:"log_root"`
 	SystemdDir  string          `json:"systemd_dir"`
 	Core        CoreOwnership   `json:"core"`
+	Hysteria    *CoreOwnership  `json:"hysteria,omitempty"`
 	Paths       []PathOwnership `json:"paths"`
 	InstalledAt time.Time       `json:"installed_at"`
 }
@@ -285,6 +289,13 @@ func installRole(options Options, role Role) (Manifest, error) {
 		if err := validateManifest(options, role, manifest); err != nil {
 			return Manifest{}, err
 		}
+		if role == RoleAgent && manifest.Hysteria != nil && options.HysteriaBinary == "" {
+			options.HysteriaBinary = manifest.Hysteria.Path
+		}
+		paths, err = expectedPaths(options, role)
+		if err != nil {
+			return Manifest{}, err
+		}
 	} else if entries, readErr := os.ReadDir(dataDir); readErr != nil {
 		return Manifest{}, readErr
 	} else if len(entries) != 0 {
@@ -344,8 +355,32 @@ func installRole(options Options, role Role) (Manifest, error) {
 			if err := installBinary(options.XrayBinary, corePath, found && ownedSet[corePath], &created); err != nil {
 				return Manifest{}, err
 			}
-		} else if err := validateExternalCore(options.XrayBinary, dataDir, options.ProjectRoot); err != nil {
-			return Manifest{}, err
+		} else if options.CoreOwner == CoreExternal {
+			if err := validateExternalCore(options.XrayBinary, dataDir, options.ProjectRoot); err != nil {
+				return Manifest{}, err
+			}
+		}
+		if options.CoreOwner == CoreNone && options.HysteriaBinary == "" {
+			return Manifest{}, errors.New("hy2-only 安装需要 --hysteria-bin")
+		}
+		if options.HysteriaBinary != "" {
+			if err := hysteria.VerifyOfficialBinary(options.HysteriaBinary, runtime.GOARCH); err != nil {
+				return Manifest{}, err
+			}
+			p := RuntimeHysteriaPath(options)
+			_, directoryErr := os.Lstat(filepath.Dir(p))
+			if directoryErr == nil && !ownedSet[filepath.Dir(p)] && options.CoreOwner != CoreProject {
+				return Manifest{}, fmt.Errorf("%w: %s", ErrUnownedPath, filepath.Dir(p))
+			}
+			if err := ensurePathDirectory(filepath.Dir(p), 0700, true); err != nil {
+				return Manifest{}, err
+			}
+			if errors.Is(directoryErr, os.ErrNotExist) {
+				created = append(created, filepath.Dir(p))
+			}
+			if err := installBinary(options.HysteriaBinary, p, found && ownedSet[p], &created); err != nil {
+				return Manifest{}, err
+			}
 		}
 	}
 	logPath := filepath.Join(options.LogRoot, string(role)+".log")
@@ -377,6 +412,9 @@ func installRole(options Options, role Role) (Manifest, error) {
 		Version: ManifestVersion, Role: role, ProjectRoot: options.ProjectRoot, DataDir: dataDir,
 		LogRoot: options.LogRoot, SystemdDir: options.SystemdDir,
 		Core: CoreOwnership{Owner: options.CoreOwner, Path: RuntimeCorePath(options), PreviousPath: previousCore}, Paths: paths, InstalledAt: time.Now().UTC(),
+	}
+	if role == RoleAgent && options.HysteriaBinary != "" {
+		manifest.Hysteria = &CoreOwnership{Owner: CoreProject, Path: RuntimeHysteriaPath(options)}
 	}
 	manifestPath := filepath.Join(dataDir, "ownership.json")
 	if err := writeOwnedFile(manifestPath, marshalManifest(manifest), 0o600, found, &created); err != nil {
@@ -421,7 +459,7 @@ func normalizeOptions(options Options) (Options, error) {
 			return Options{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	for name, value := range map[string]*string{"control binary": &options.ControlBinary, "agent binary": &options.AgentBinary, "Xray binary": &options.XrayBinary} {
+	for name, value := range map[string]*string{"control binary": &options.ControlBinary, "agent binary": &options.AgentBinary, "Xray binary": &options.XrayBinary, "Hysteria binary": &options.HysteriaBinary} {
 		if *value == "" {
 			continue
 		}
@@ -430,8 +468,8 @@ func normalizeOptions(options Options) (Options, error) {
 			return Options{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	if options.CoreOwner != CoreProject && options.CoreOwner != CoreExternal {
-		return Options{}, errors.New("Core owner must be project or external")
+	if options.CoreOwner != CoreProject && options.CoreOwner != CoreExternal && options.CoreOwner != CoreNone {
+		return Options{}, errors.New("Core owner must be project, external or none")
 	}
 	if !serviceNamePattern.MatchString(options.ServiceUser) || !serviceNamePattern.MatchString(options.ServiceGroup) {
 		return Options{}, errors.New("service user/group name is invalid")
@@ -487,10 +525,17 @@ func expectedPaths(options Options, role Role) ([]PathOwnership, error) {
 }
 
 func RuntimeCorePath(options Options) string {
+	if options.CoreOwner == CoreNone {
+		return ""
+	}
 	if options.CoreOwner == CoreExternal {
 		return options.XrayBinary
 	}
 	return filepath.Join(options.DataRoot, string(RoleAgent), "runtime", "xray")
+}
+
+func RuntimeHysteriaPath(options Options) string {
+	return filepath.Join(options.DataRoot, string(RoleAgent), "runtime", "hysteria")
 }
 
 func legacyCoreOwnership(options Options, role Role) PathOwnership {
@@ -517,6 +562,13 @@ func expectedPathsForCore(options Options, role Role, corePath string) ([]PathOw
 				paths = append(paths, PathOwnership{Path: filepath.Dir(corePath), Kind: "directory", Role: role, Source: "created", Purge: true})
 			}
 			paths = append(paths, PathOwnership{Path: corePath, Kind: "core-binary", Role: role, Source: options.XrayBinary, Uninstall: true, Purge: true})
+		}
+		if options.HysteriaBinary != "" {
+			p := RuntimeHysteriaPath(options)
+			if options.CoreOwner != CoreProject {
+				paths = append(paths, PathOwnership{Path: filepath.Dir(p), Kind: "directory", Role: role, Source: "created", Purge: true})
+			}
+			paths = append(paths, PathOwnership{Path: p, Kind: "hysteria-binary", Role: role, Source: options.HysteriaBinary, Uninstall: true, Purge: true})
 		}
 	}
 	return paths, nil
@@ -562,6 +614,13 @@ func validateManifest(options Options, role Role, manifest Manifest) error {
 	}
 	checkOptions := options
 	checkOptions.CoreOwner = manifest.Core.Owner
+	checkOptions.HysteriaBinary = ""
+	if manifest.Hysteria != nil {
+		if role != RoleAgent || manifest.Hysteria.Owner != CoreProject || manifest.Hysteria.Path != RuntimeHysteriaPath(options) {
+			return ErrManifest
+		}
+		checkOptions.HysteriaBinary = manifest.Hysteria.Path
+	}
 	expected, err := expectedPaths(checkOptions, role)
 	if err != nil {
 		return err
@@ -592,7 +651,10 @@ func validateManifest(options Options, role Role, manifest Manifest) error {
 			return ErrManifest
 		}
 	}
-	if manifest.Core.Owner != CoreProject && manifest.Core.Owner != CoreExternal {
+	if manifest.Core.Owner != CoreProject && manifest.Core.Owner != CoreExternal && manifest.Core.Owner != CoreNone {
+		return ErrManifest
+	}
+	if role == RoleAgent && manifest.Core.Owner == CoreNone && (manifest.Hysteria == nil || manifest.Core.Path != "") {
 		return ErrManifest
 	}
 	// Uninstall and ownership checks intentionally do not require the original
@@ -672,7 +734,7 @@ func installFile(path string, mode os.FileMode, replaceOwned bool, write func(*o
 		return err
 	}
 	if runtime.GOOS == "windows" && replaceOwned {
-		if err := os.Remove(path); err != nil {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
@@ -772,7 +834,13 @@ func renderUnit(options Options, role Role, dataDir, logPath string) (string, er
 		args = []string{"serve", "--data-dir", dataDir, "--listen", options.ControlListen}
 	case RoleAgent:
 		executable = filepath.Join(options.ProjectRoot, "bin", "control-agent")
-		args = []string{"run", "--data-dir", dataDir, "--xray-path", RuntimeCorePath(options)}
+		args = []string{"run", "--data-dir", dataDir}
+		if options.CoreOwner != CoreNone {
+			args = append(args, "--xray-path", RuntimeCorePath(options))
+		}
+		if options.HysteriaBinary != "" {
+			args = append(args, "--hysteria-path", RuntimeHysteriaPath(options))
+		}
 	default:
 		return "", ErrUnsupportedRole
 	}

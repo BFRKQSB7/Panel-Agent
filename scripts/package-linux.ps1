@@ -3,12 +3,18 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [Parameter(Mandatory)][string]$XrayAmd64Package,
     [Parameter(Mandatory)][string]$XrayArm64Package,
+    [string]$HysteriaAmd64Binary,
+    [string]$HysteriaArm64Binary,
+    [string]$HysteriaLicense,
     [string]$WslDistribution = 'Debian'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = [IO.Path]::GetFullPath($OutputDirectory)
+$withHysteria = [bool]($HysteriaAmd64Binary -or $HysteriaArm64Binary -or $HysteriaLicense)
+if ($withHysteria -and (-not $HysteriaAmd64Binary -or -not $HysteriaArm64Binary -or -not $HysteriaLicense)) { throw 'Hysteria 打包需要同时提供两个架构的官方二进制与许可证。' }
+if ($withHysteria -and (Get-FileHash -Algorithm SHA256 -LiteralPath $HysteriaLicense).Hash.ToLowerInvariant() -ne 'b279cfdac4db4b077f0660b5d8156d50a8bc7bd410036dc356499af43c4e84f5') { throw '官方 Hysteria 许可证校验失败。' }
 if (Test-Path -LiteralPath $output) { throw '输出目录必须不存在，避免覆盖已有产物。' }
 $versionMatch = [regex]::Match([IO.File]::ReadAllText((Join-Path $repository 'internal/protocol/messages.go')), 'const AgentVersion = "([0-9.]+)"')
 if (-not $versionMatch.Success) { throw '未找到程序版本。' }
@@ -52,6 +58,21 @@ try {
                 try { $inputStream.CopyTo($outputStream) } finally { $inputStream.Dispose(); $outputStream.Dispose() }
             }
         } finally { $zip.Dispose() }
+        $hysteriaManifest = $null
+        if ($withHysteria) {
+            $hySource = if ($arch -eq 'amd64') { $HysteriaAmd64Binary } else { $HysteriaArm64Binary }
+            $hyExpected = if ($arch -eq 'amd64') { '907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691' } else { 'a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677a7' }
+            if ((Get-FileHash -Algorithm SHA256 -LiteralPath $hySource).Hash.ToLowerInvariant() -ne $hyExpected) { throw "官方 Hysteria v2.13.0 校验失败：$arch" }
+            Copy-Item -LiteralPath $hySource -Destination (Join-Path $bundle 'hysteria')
+            Copy-Item -LiteralPath $HysteriaLicense -Destination (Join-Path $licenseRoot 'Hysteria-2.13.0-LICENSE')
+            $extensionDir = Join-Path $bundle 'protocol-extensions'
+            New-Item -ItemType Directory -Path $extensionDir | Out-Null
+            $extensionZip = [IO.Compression.ZipFile]::Open((Join-Path $extensionDir 'official-hysteria2.zip'),[IO.Compression.ZipArchiveMode]::Create)
+            try {
+                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($extensionZip,(Join-Path $repository 'examples/extensions/official-hysteria2/package.json'),'package.json') | Out-Null
+            } finally { $extensionZip.Dispose() }
+            $hysteriaManifest = [ordered]@{version='2.13.0';binary_sha256=$hyExpected;source='https://github.com/HyNetworks/hysteria/releases/tag/app/v2.13.0'}
+        }
         $modules = @(& go list -deps -f '{{with .Module}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}' ./cmd/control ./cmd/agent ./cmd/installer | Where-Object { $_ } | Sort-Object -Unique)
         if ($LASTEXITCODE -ne 0) { throw '依赖枚举失败。' }
         $licenseIndex = @()
@@ -75,6 +96,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $repository 'docs') -Destination (Join-Path $bundle 'docs') -Recurse
         Copy-Item -LiteralPath (Join-Path $repository 'README.md') -Destination (Join-Path $bundle 'README.md')
         $manifest = [ordered]@{version=$version;platform="linux/$arch";source_revision=$revision;go=$goVersion;status='unaccepted_local_candidate';project_license='not_declared';xray=[ordered]@{version='26.10.21';package_sha256=$expected;source='https://github.com/XTLS/Xray-core/releases/tag/v26.10.21'};dependencies=$licenseIndex}
+        if ($withHysteria) { $manifest['hysteria'] = $hysteriaManifest }
         [IO.File]::WriteAllText((Join-Path $bundle 'manifest.json'),($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
         $checksums = @(Get-ChildItem -LiteralPath $bundle -File -Recurse | Sort-Object FullName | ForEach-Object { (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetRelativePath($bundle,$_.FullName).Replace('\','/') })
         [IO.File]::WriteAllText((Join-Path $bundle 'SHA256SUMS'),($checksums -join "`n") + "`n",[Text.UTF8Encoding]::new($false))

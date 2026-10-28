@@ -1,12 +1,14 @@
 # Panel-Agent
 
-Go 编写的管理面板与主动拉取配置的 Agent，通过每台机器一个 Xray Core 提供节点、用户权限、三维配额、持久流量账本和隐藏的一跳 Exit。任务执行与验收状态只在 [任务索引](tasks/README.md) 维护。
+Go 编写的管理面板与主动拉取配置的 Agent，提供节点、用户权限、三维配额、持久流量账本和隐藏的一跳 Exit。VLESS+Reality/Trojan 使用每机一个 Xray，hy2 使用独立官方 Hysteria 2；按需选择 hy2-only 或双内核。任务执行与验收状态只在 [任务索引](tasks/README.md) 维护。
 
 ## 运行范围
 
 安装器面向 Debian 12+/Ubuntu 22.04+、systemd、amd64/arm64。Agent 的低配目标为整机 128MiB/1GB，Panel 与本机节点的目标为 1C/512MiB；实际承载能力取决于节点、用户和连接数量，必须通过对应整机验收。Alpine 功能测试、交叉编译和单独 cgroup 压测分别保留证据，不能代替正式平台矩阵。
 
 内置 Core 最低版本为 Xray `26.10.21`。128MiB 升级测试使用 `GOMEMLIMIT=32MiB GOGC=50`，并记录主机现有服务、swap 和 OOM 计数；这些环境变量需要由运维显式配置，默认 systemd unit 不会自动设置整机资源限制。扩展仅支持声明式受限协议包，具体能力通过管理界面与 API 检查，不支持任意脚本运行时。
+
+hy2 当前固定官方 Hysteria `2.13.0`，提供 Direct、URI/Mihomo、独立实例与统一配额账本；见 [安装和 NAT UDP 指引](docs/hysteria2.md)。hy2 及双内核资源指标另行验收，当前不宣称通过 128MiB 门槛。
 
 ## 构建与本地候选包
 

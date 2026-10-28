@@ -4,8 +4,8 @@
 <label>公网端口 <input type="number" name="public_port" value="{{if .PublicPort}}{{.PublicPort}}{{end}}" min="1" max="65535" required></label>
 <label>监听 IP <input name="listen_host" value="{{.ListenHost}}" required></label>
 <label>监听端口 <input type="number" name="listen_port" value="{{if .ListenPort}}{{.ListenPort}}{{end}}" min="1" max="65535" required></label>
-<label>Reality SNI <input name="server_name" value="{{.ServerName}}" required></label>
-<label>Reality 目标 <input name="target" value="{{.Target}}" placeholder="主机:端口" required></label>
+<label>Reality SNI（仅内置协议） <input name="server_name" value="{{.ServerName}}" required></label>
+<label>Reality 目标（仅内置协议） <input name="target" value="{{.Target}}" placeholder="主机:端口" required></label>
 <label>节点默认用户额度（字节，留空不限；0 为零） <input name="quota_bytes" value="{{if .QuotaBytes}}{{.QuotaBytes}}{{end}}" inputmode="numeric" pattern="[0-9]+" maxlength="19" placeholder="不限"></label>
 <label><input type="checkbox" name="enabled" value="true" {{if .Enabled}}checked{{end}}>启用节点</label>
 <label class="development"><input type="checkbox" name="development" value="true" {{if .Development}}checked{{end}}>启用开发凭证，仅用于隔离测试</label>
@@ -15,7 +15,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reality 节点</title>
+  <title>代理节点</title>
   <script src="/assets/connectivity.js" defer></script>
   <style>
     body{font:16px system-ui,sans-serif;max-width:64rem;margin:3rem auto;padding:0 1rem;color:#17202a}
@@ -29,11 +29,11 @@
 </head>
 <body>
   <main>
-    <h1>{{.Machine.DisplayName}} · Reality 节点</h1>
+    <h1>{{.Machine.DisplayName}} · 代理节点</h1>
     <p><a href="/admin/machines">返回机器管理</a></p>
     <p>目标 revision：{{.Machine.DesiredRevision}}；已接收：{{.Machine.ReceivedRevision}}；已应用：{{.Machine.AppliedRevision}}。{{if .Machine.ApplyError}}应用状态：{{.Machine.ApplyError}}。{{end}}</p>
 	<p>Core generation：{{.Machine.CoreGeneration}}；应用 authority：<code>{{.Machine.AppliedAuthorityEpoch}}</code></p>
-    <p class="muted">公网主机和内外端口均由管理员录入；这些值不代表 NAT 映射已验证。所有启用节点由本机同一个 Core 承载，变更配置时现有连接可能短暂中断。</p>
+    <p class="muted">公网主机和内外端口均由管理员录入；这些值不代表 NAT 映射已验证。Reality/Trojan 使用 Xray，hy2 使用官方 Hysteria 内核。hy2 需要 UDP 映射、有效 TLS 证书和已配置的内核；变更配置时连接可能短暂中断。</p>
     <section>
       <h2>新建节点</h2>
       <p>Reality 密钥和 Short ID 自动生成。开发凭证默认关闭，请仅在隔离测试时启用。</p>
@@ -78,7 +78,7 @@
         <p class="status">Agent：{{.AgentStatus}}
 Core：{{.CoreStatus}}
 探测：{{.ProbeStatus}}</p>
-        <p><button type="button" data-check-path="{{.ProbePath}}" data-check-mode="public">检查 Panel → 公网 TCP</button>{{if .LocalProbe}}<button type="button" data-check-path="{{.ProbePath}}" data-check-mode="local">检查本机 loopback TCP</button>{{end}} <span data-check-status role="status"></span></p>
+        {{if not .UDPOnly}}<p><button type="button" data-check-path="{{.ProbePath}}" data-check-mode="public">检查 Panel → 公网 TCP</button>{{if .LocalProbe}}<button type="button" data-check-path="{{.ProbePath}}" data-check-mode="local">检查本机 loopback TCP</button>{{end}} <span data-check-status role="status"></span></p>{{end}}
       </section>
       {{end}}
     </article>

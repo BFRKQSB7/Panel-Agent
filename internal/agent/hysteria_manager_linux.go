@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -51,20 +50,8 @@ func newHysteriaManager(ctx context.Context, dir, binary string, book *ledger.St
 	}
 	// Pin the actual official artifact, not a version string supplied by an
 	// arbitrary executable. Upgrade support must explicitly extend this allowlist.
-	expected := map[string]string{"amd64": "907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691", "arm64": "a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677a7"}[runtime.GOARCH]
-	info, err := os.Lstat(binary)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || expected == "" {
-		return nil, errors.New("hysteria: unsupported or unsafe official executable")
-	}
-	f, err := os.Open(binary)
-	if err != nil {
+	if err := hysteria.VerifyOfficialBinary(binary, runtime.GOARCH); err != nil {
 		return nil, err
-	}
-	hash := sha256.New()
-	_, err = io.Copy(hash, io.LimitReader(f, 128<<20))
-	f.Close()
-	if err != nil || hex.EncodeToString(hash.Sum(nil)) != expected {
-		return nil, errors.New("hysteria: official v2.13.0 checksum mismatch")
 	}
 	root, err := storage.PrepareDataDir(dir)
 	if err != nil {
