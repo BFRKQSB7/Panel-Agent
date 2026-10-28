@@ -332,5 +332,11 @@ func ownsUDP(pid int, host string, port int) error {
 			return nil
 		}
 	}
+	// Go may implement an IPv4 wildcard requested with network "udp" using a
+	// dual-stack IPv6 wildcard. Check ownership there too; this is a local socket
+	// readiness check, while IPv4 reachability requires the separate QUIC smoke.
+	if ip.To4() != nil && ip.IsUnspecified() {
+		return ownsUDP(pid, "::", port)
+	}
 	return errors.New("hysteria: child does not own expected UDP listener")
 }

@@ -3,13 +3,13 @@
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
 CURRENT MILESTONE: M5 — 运维与发布
-RECOMMENDED NEXT TASK: [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md)（用户新增需求；先开发，测试/部署暂缓；D17 保留最终验收）
+RECOMMENDED NEXT TASK: [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md)（用户已允许测试；继续持久恢复与账本接入，D17 保留最终验收）
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
 | Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
 |---|---|---|---|---|---|
-| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 官方适配包已含配置渲染、回环认证、非清零统计/踢人、Linux 子进程与认证服务生命周期、UDP socket 归属检查、到期/撤销停止及私有目录锁；Agent 新增三维配额/到期授权投影与逐用户逐节点账本 reading 转换。对应测试已写未运行，仅格式化/diff 检查；下一步接持久恢复、独立 source/generation 和采样边界，再接 Panel/安装升级。尚不可作为可用 hy2 节点；懒猫 UDP 映射待设置，不构成开发阻塞。 |
+| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 官方适配包/实例管理及 Agent 授权计量投影已实现。Windows 两包 test/vet、Debian WSL Linux 单测与官方 v2.13.0 回环 smoke 通过：实际 IPv4 QUIC+证书校验认证、重复实例拒绝、撤销/到期退出；修正 IPv4 通配监听落在 udp6 表导致的误报。amd64 官方资产 SHA256 `907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691` 已核对。下一步接持久恢复、独立 source/generation 与采样边界，再接 Panel/安装升级；尚不可作为可用 hy2 节点，公网代理与资源未验收。懒猫 UDP 映射待设置，不构成开发阻塞。 |
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | DONE | high | — | 指定且获用户接受的玩具冰岛 128MiB 整机容器 smoke 通过：16 次 Reality 请求/分入口累计 Stats/重启清零；系统采样峰值 64.1MiB，OOM 零，原服务保留；WSL 回归通过。 |
 | [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |
