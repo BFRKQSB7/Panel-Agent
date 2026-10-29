@@ -17,7 +17,7 @@
     <p class="muted">扩展包只接受固定声明式字段和白名单 renderer。Panel 不执行脚本、动态库、Shell、网络请求或任意 Xray JSON；导入后默认停用。</p>
     <section>
       <h2>导入扩展 ZIP</h2>
-      <p class="muted">ZIP 只能包含一个 <code>package.json</code>，压缩大小、展开大小、条目数量、路径和特殊文件均受限。可用 <code>examples/extensions/trojan-tls-v1/package.json</code> 制作示例包。</p>
+      <p class="muted">ZIP 只能包含一个 <code>package.json</code>，压缩大小、展开大小、条目数量、路径和特殊文件均受限。Trojan 示例位于 <code>examples/extensions/trojan-tls-v1/package.json</code>，官方 Hysteria 2 示例位于 <code>examples/extensions/official-hysteria2/package.json</code>。</p>
       <form method="post" action="/admin/extensions/import" enctype="multipart/form-data">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="file" name="package" accept=".zip,application/zip" required>

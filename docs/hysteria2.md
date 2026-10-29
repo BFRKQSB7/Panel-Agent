@@ -20,6 +20,8 @@ control-agent run --data-dir /var/lib/panel-agent/agent \
 
 需要 Reality 时同时传 `--xray-path`。`sync` 是一次性操作，hy2 认证需要常驻 Agent，应以 `run` 或安装器生成的 systemd 服务提供持续服务。
 
+变更内核组合前先在 Panel 停用或移除对应节点，并保持原内核参数完成一次同步。仍有启用的 hy2 节点或未完成配置时，Agent 拒绝省略 `--hysteria-path`；切换至 hy2-only 会停止并结算原有受管 Xray，清除其可恢复配置。机器状态序号独立于两套内核的计量来源，切换后不会把较小的内核序号回报为旧状态。
+
 官方 v2.13.0 资产校验值：
 
 | 架构 | SHA256 |

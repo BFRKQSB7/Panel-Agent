@@ -50,7 +50,7 @@
     {{$node := .}}
     <article>
       <h2>{{.Name}}</h2>
-      <p>节点 ID：<code>{{.NodeID}}</code>；公钥：<code>{{.PublicKey}}</code>；Short ID：<code>{{.ShortID}}</code></p>
+      <p>节点 ID：<code>{{.NodeID}}</code>{{if not .ExtensionID}}；公钥：<code>{{.PublicKey}}</code>；Short ID：<code>{{.ShortID}}</code>{{end}}</p>
       {{if .ExtensionID}}<p>协议扩展：<code>{{.ExtensionID}}@{{.ExtensionVersion}}</code>，SNI：<code>{{.ExtensionSNI}}</code>；状态：{{if .ExtensionEnabled}}已启用{{else}}已停用，Node 定义保留但不会进入 Core/订阅{{end}}</p>{{end}}
       {{if .Development}}<p class="development">此节点启用了开发凭证，测试 UUID：<code>{{.DevelopmentUUID}}</code>。测试完成后关闭该选项。</p>{{end}}
       <form class="fields" method="post" action="/admin/machines/{{$.Machine.MachineID}}/nodes/{{.NodeID}}">
@@ -68,7 +68,7 @@
       {{with index $.Guides $node.NodeID}}
       <section class="guide">
         <h3>公网接入引导与有限检查</h3>
-        <p class="muted">当前值来自此 Node；改动公网主机或端口后刷新本页再复制。公网探测由 Panel 发起，只能证明选定位置的 DNS/TCP 路径，不能证明 Agent、Reality 握手、UDP、用户订阅或最终代理出口。</p>
+        <p class="muted">当前值来自此 Node；改动公网主机或端口后刷新本页再复制。{{if .UDPOnly}}此节点使用 UDP/QUIC，需通过真实客户端验证公网映射、协议握手与业务转发。{{else}}公网探测由 Panel 发起，只能证明选定位置的 DNS/TCP 路径，不能证明 Agent、Reality 握手、UDP、用户订阅或最终代理出口。{{end}}</p>
         <h4>NAT / 防火墙</h4>
         {{range $i, $step := .NAT}}<div class="guide-item"><strong>{{$step.Label}}</strong><textarea id="guide-{{$node.NodeID}}-nat-{{$i}}" readonly>{{$step.Text}}</textarea><span><button type="button" data-copy-target="guide-{{$node.NodeID}}-nat-{{$i}}">复制</button><small data-copy-status></small></span></div>{{end}}
         <h4>DNS</h4>

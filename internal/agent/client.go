@@ -127,6 +127,11 @@ func (c *Client) EnableCores(ctx context.Context, binaryPath, hysteriaPath strin
 	if c.hysteria != nil {
 		return errors.New("Hysteria manager is already enabled")
 	}
+	if hysteriaPath == "" {
+		if err := requireHysteriaRemoval(c.store.dataDir); err != nil {
+			return err
+		}
+	}
 	if binaryPath == "" {
 		if hysteriaPath == "" {
 			return errors.New("请指定至少一个内核")
@@ -136,6 +141,9 @@ func (c *Client) EnableCores(ctx context.Context, binaryPath, hysteriaPath strin
 			return err
 		}
 		c.ledger = book
+		if err := retireOmittedXray(ctx, c.store.dataDir, book); err != nil {
+			return err
+		}
 		c.hysteria, err = newHysteriaManager(ctx, c.store.dataDir, hysteriaPath, book)
 		return err
 	}
@@ -420,6 +428,13 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		if !request.Applied && request.ApplyError == "" {
 			request.ApplyError = protocol.ErrorCorePending
 		}
+	}
+	kind := "hysteria"
+	if c.core != nil {
+		kind = "xray"
+	}
+	if err := c.mapCoreStatus(kind, &request); err != nil {
+		return err
 	}
 	var response protocol.StatusResponse
 	if _, err := c.postJSON(ctx, "/api/v1/agent/status", request, c.identity.MachineSecret, &response); err != nil {

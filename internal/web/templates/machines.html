@@ -31,7 +31,7 @@
     <article>
       <h2>{{.DisplayName}}</h2>
       <p>机器 ID：<code>{{.MachineID}}</code></p>
-      <p><a href="/admin/machines/{{.MachineID}}/nodes">管理 Reality 节点</a></p>
+      <p><a href="/admin/machines/{{.MachineID}}/nodes">管理代理节点</a></p>
       <p>隐藏 Exit：{{if .Exit}}已配置，公网 {{.Exit.PublicHost}}:{{.Exit.PublicPort}}，监听 {{.Exit.ListenHost}}:{{.Exit.ListenPort}}{{else}}未配置{{end}}。Exit 只接受受管 Transit 凭证，不出现在用户订阅。</p>
       <form method="post" action="/admin/machines/{{.MachineID}}/exit">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">

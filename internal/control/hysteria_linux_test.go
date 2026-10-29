@@ -318,4 +318,55 @@ func TestOfficialHysteriaPanelClientSubscriptionAndRevocation(t *testing.T) {
 	}
 	probe.Close()
 	t.Log("Panel user revocation stopped existing official instance")
+	if xrayBinary := os.Getenv("PANEL_AGENT_TEST_XRAY"); xrayBinary != "" {
+		client.Close()
+		omitted, err := agent.LoadClient(agentDir, caPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := omitted.EnableCores(ctx, xrayBinary, "", false, true); err == nil || !strings.Contains(err.Error(), "hysteria-path") {
+			omitted.Close()
+			t.Fatalf("enabled hy2 omission was not fenced: %v", err)
+		}
+		omitted.Close()
+		var lastGeneration uint64
+		for _, xrayPath := range []string{"", xrayBinary} {
+			next, err := agent.LoadClient(agentDir, caPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := next.EnableCores(ctx, xrayPath, runtimeBinary, false, true); err != nil {
+				next.Close()
+				t.Fatal(err)
+			}
+			if err := next.SyncOnce(ctx); err != nil {
+				next.Close()
+				t.Fatal(err)
+			}
+			status, err := server.store.GetMachine(ctx, machine)
+			if err != nil || status.AppliedRevision != status.DesiredRevision || status.CoreGeneration <= lastGeneration {
+				next.Close()
+				t.Fatalf("mode transition status: %+v %v", status, err)
+			}
+			lastGeneration = status.CoreGeneration
+			if xrayPath == "" {
+				data, err := os.ReadFile(filepath.Join(agentDir, "core", "state.json"))
+				if err != nil {
+					next.Close()
+					t.Fatal(err)
+				}
+				var old struct{ Process, Current, LKG json.RawMessage }
+				if err := json.Unmarshal(data, &old); err != nil {
+					next.Close()
+					t.Fatal(err)
+				}
+				if string(old.Process) != "null" || string(old.Current) != "null" || string(old.LKG) != "null" {
+					next.Close()
+					t.Fatal("omitted Xray retained recoverable configuration")
+				}
+			}
+			next.Close()
+		}
+		t.Log("dual to hy2-only to dual status remained monotonic; omitted core configuration retired")
+	}
 }

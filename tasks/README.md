@@ -3,13 +3,13 @@
 本文件是唯一执行状态源。当前方案按 DeepSeek V4.1 Flash 连续开发重新拆分，共 17 个任务、5 个里程碑；旧 8 个任务包已替换。任务正文是静态工作包，完整产品基线见 [PROJECT_PLAN.md](../PROJECT_PLAN.md)，日常无需全文重读。
 
 CURRENT MILESTONE: M5 — 运维与发布
-RECOMMENDED NEXT TASK: [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md)（用户已允许测试；继续持久恢复与账本接入，D17 保留最终验收）
+RECOMMENDED NEXT TASK: [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md)（继续组合与并发回归、重建最终候选；D17 保留正式资源与长稳验收）
 DEFAULT MODEL: DeepSeek V4.1 Flash / `deepseek-flash` / thinking enabled  
 DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
 | Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
 |---|---|---|---|---|---|
-| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 官方双内核、Client、扩展/订阅、统一账本和安装生命周期已贯通；真实 HTTP/UDP DNS、503 后补账、用户撤销 smoke 通过（hy2-only/Xray 共存）。独立升级、最低版本门控、2.12.3→2.13.0 业务、失败回滚、升级日志恢复及 Panel 备份恢复/authority 重连通过。Phoenix 原生 arm64 的转发/补账/撤销、Agent/source/manager 和安装生命周期通过，临时文件进程已清理，生产服务状态未变；新增受限 fullchain PEM 支持与回归。Windows/Linux 安装生命周期、全仓 test/vet 通过；`.work/release-hy2-d0d8433-20261028` 双架构候选需按最终代码重建。继续前端与组合验证；公网 NAT/资源未验收。测试有超时/父进程终止。 |
+| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 双内核、Client、扩展/订阅、统一账本、安装与独立升级已贯通；HTTP/UDP、503 后补账、撤销、2.12.3→2.13.0/失败回滚/日志恢复、Panel 备份恢复通过。Phoenix 原生 arm64 生命周期通过；新增 fullchain 支持、机器级状态序号、双内核→hy2-only→双内核回归及省略内核安全门控，实际旧 Xray 停止/结算/清除授权恢复配置通过。Edge 扩展导入/启用/节点创建及 UDP 引导通过。用户批准懒猫测试冰岛 45003/UDP→18443；凤凰城跨公网 NAT 的 HTTP/UDP DNS、逐账户累计统计和撤销释放端口通过（TX 3715/RX 9190），两端临时目录已清理、原服务状态未变。全仓 test/vet 通过；继续并发/组合回归与候选重建。四机组合、正式资源与固定长稳未验收；所有测试有超时/清理边界。 |
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | DONE | high | — | 指定且获用户接受的玩具冰岛 128MiB 整机容器 smoke 通过：16 次 Reality 请求/分入口累计 Stats/重启清零；系统采样峰值 64.1MiB，OOM 零，原服务保留；WSL 回归通过。 |
 | [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |
