@@ -310,6 +310,11 @@ func CompileNode(pkg Package, values map[string]string) (CompiledNode, error) {
 	if err := Validate(pkg); err != nil {
 		return CompiledNode{}, err
 	}
+	for _, field := range pkg.Schema.Fields {
+		if len(values[field.Name]) == 0 || len(values[field.Name]) > field.Max {
+			return CompiledNode{}, fmt.Errorf("%w：必需字段缺失或超出大小限制", ErrInvalidPackage)
+		}
+	}
 	for key := range values {
 		if key != "sni" && key != "certificate_pem" && key != "private_key_pem" {
 			return CompiledNode{}, fmt.Errorf("%w：存在未知动态字段", ErrInvalidPackage)
@@ -335,11 +340,29 @@ func CompileNode(pkg Package, values map[string]string) (CompiledNode, error) {
 }
 
 func parseCertificate(value string) (*x509.Certificate, error) {
-	block, rest := pem.Decode([]byte(value))
-	if block == nil || len(bytes.TrimSpace(rest)) != 0 || block.Type != "CERTIFICATE" {
-		return nil, errors.New("certificate PEM invalid")
+	rest := bytes.TrimSpace([]byte(value))
+	var leaf *x509.Certificate
+	for count := 0; len(rest) > 0; count++ {
+		if count >= 8 || !bytes.HasPrefix(rest, []byte("-----BEGIN CERTIFICATE-----")) {
+			return nil, errors.New("certificate chain PEM invalid")
+		}
+		block, next := pem.Decode(rest)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return nil, errors.New("certificate PEM invalid")
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		if leaf == nil {
+			leaf = certificate
+		}
+		rest = bytes.TrimSpace(next)
 	}
-	return x509.ParseCertificate(block.Bytes)
+	if leaf == nil {
+		return nil, errors.New("certificate chain is empty")
+	}
+	return leaf, nil
 }
 
 func parsePrivateKey(value string) (any, error) {

@@ -141,6 +141,21 @@ func TestOfficialHysteriaDeclarationAndSubscriptions(t *testing.T) {
 	}
 }
 
+func TestExtensionFullChainAndPEMBounds(t *testing.T) {
+	cert, key := testCertificate(t)
+	values := map[string]string{"sni": "edge.example.test", "certificate_pem": cert + cert, "private_key_pem": key}
+	compiled, err := CompileNode(testPackage(), values)
+	if err != nil || compiled.CertificatePEM != cert+cert {
+		t.Fatalf("fullchain rejected or truncated: %v", err)
+	}
+	for _, invalid := range []string{cert + "not PEM", strings.Repeat(cert, 9), "garbage\n" + cert, strings.Repeat("x", 65537)} {
+		values["certificate_pem"] = invalid
+		if _, err := CompileNode(testPackage(), values); err == nil {
+			t.Fatal("invalid certificate chain accepted")
+		}
+	}
+}
+
 func testCertificate(t *testing.T) (string, string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

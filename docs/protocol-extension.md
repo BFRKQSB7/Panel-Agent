@@ -4,7 +4,7 @@ Panel-Agent v1 的扩展包由外部工具生成，Panel 只接收并静态验�
 
 `package.json` 的顶层必须是 `manifest`、`schema`、`renderers` 三个对象。支持固定的 `xray.trojan_tls`，以及独立官方内核的 `hysteria.hysteria2_tls`（version=2、Core kind=hysteria、min_version 为已支持的 2.12.3 或 2.13.0），对应 URI/Mihomo renderer 必须同类型。两种内核声明不得混用，不能通过包覆盖 API、Stats、日志、路由或端口边界。`one_hop`、`sing_box` 以及未实现的能力必须声明为 `false`。hy2 最低版本会下发并由 Agent 检查，运行和 NAT 配置见 [官方内核说明](hysteria2.md)。
 
-最小示例的字段固定为 `sni`、`certificate_pem`、`private_key_pem`。SNI 是域名纯文本；证书和私钥必须是匹配的 PEM，Panel 解析证书、解析私钥并校验公钥匹配后才接受。SNI 只保存为可展示元数据，证书与私钥使用 Panel master key 加密保存，普通 Node/API/用户订阅不会返回私钥；下发给 Agent 的已确认快照仍由既有 machine snapshot 加密存储和权限边界保护。
+最小示例的字段固定为 `sni`、`certificate_pem`、`private_key_pem`。SNI 是域名纯文本；证书可使用叶证书在前的完整 PEM 链（最多 8 张，整个字段最多 65536 bytes），私钥须与第一张证书匹配。Panel 解析全部证书与私钥并校验公钥匹配后才接受，拒绝夹杂其他 PEM 或垃圾尾部。SNI 只保存为可展示元数据，证书与私钥使用 Panel master key 加密保存，普通 Node/API/用户订阅不会返回私钥；下发给 Agent 的已确认快照仍由既有 machine snapshot 加密存储和权限边界保护。
 
 示例包位于 [`examples/extensions/trojan-tls-v1/package.json`](../examples/extensions/trojan-tls-v1/package.json)。在 PowerShell 中制作导入包：
 

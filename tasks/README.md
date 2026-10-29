@@ -9,7 +9,7 @@ DEFAULT THINKING: `high`；D08、D09、D15、D16 使用 `max`
 
 | Task | Milestone | Status | Thinking | Depends on | 验证摘要 / blocker |
 |---|---|---|---|---|---|
-| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 官方双内核、Client、扩展/订阅、统一账本和安装生命周期已贯通；真实 HTTP/UDP DNS、503 后补账、用户撤销 smoke 通过（hy2-only/Xray 共存）。新增本机独立升级、最低版本门控，官方 2.12.3→2.13.0 后业务、启动失败回滚、三种升级日志状态恢复及 Panel 备份恢复/authority 重连通过。Windows/Linux 安装重装卸载/purge、全仓 test/vet 通过；`.work/release-hy2-d0d8433-20261028` 已产出双架构候选，需按最终代码重建。待原生 arm64/前端及更深入组合验证；公网 NAT/资源未验收。测试有超时/父进程终止，退出无遗留进程。 |
+| [D13-HY2 — 官方 Hysteria 2 内核适配](D13-hysteria2-official-core.md) | M4 | IN_PROGRESS | max | D08, D10, D13, D15 | 官方双内核、Client、扩展/订阅、统一账本和安装生命周期已贯通；真实 HTTP/UDP DNS、503 后补账、用户撤销 smoke 通过（hy2-only/Xray 共存）。独立升级、最低版本门控、2.12.3→2.13.0 业务、失败回滚、升级日志恢复及 Panel 备份恢复/authority 重连通过。Phoenix 原生 arm64 的转发/补账/撤销、Agent/source/manager 和安装生命周期通过，临时文件进程已清理，生产服务状态未变；新增受限 fullchain PEM 支持与回归。Windows/Linux 安装生命周期、全仓 test/vet 通过；`.work/release-hy2-d0d8433-20261028` 双架构候选需按最终代码重建。继续前端与组合验证；公网 NAT/资源未验收。测试有超时/父进程终止。 |
 | [D01 — 验证真实 Core、统计粒度与 128MB 原型](D01-core-feasibility.md) | M1 | DONE | high | — | 指定且获用户接受的玩具冰岛 128MiB 整机容器 smoke 通过：16 次 Reality 请求/分入口累计 Stats/重启清零；系统采样峰值 64.1MiB，OOM 零，原服务保留；WSL 回归通过。 |
 | [D02 — 启动 Panel、管理员认证与持久设置](D02-panel-admin-foundation.md) | M1 | DONE | high | — | Windows HTTP/HTTPS smoke、初始化/登录/CSRF/注销/重启持久化/缺失密钥拒绝通过；`go test ./...`、Linux amd64 编译通过。 |
 | [D03 — 机器注册、身份隔离与主动同步](D03-machine-control-channel.md) | M1 | DONE | high | D02 | 全量 Go 测试、Linux amd64 编译与 Windows HTTPS 进程 smoke 通过；注册恢复/authority/重配/吊销闭环通过。 |
