@@ -407,7 +407,7 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		if !status.RestrictionAppliedAt.IsZero() {
 			request.RestrictionAppliedAt = status.RestrictionAppliedAt.UTC().Format(time.RFC3339Nano)
 		}
-		request.Applied = status.Running && status.AuthorityEpoch == c.identity.AuthorityEpoch && status.Revision == c.identity.Revision && status.Digest == c.identity.Digest
+		request.Applied = status.Error == "" && status.Running && status.AuthorityEpoch == c.identity.AuthorityEpoch && status.Revision == c.identity.Revision && status.Digest == c.identity.Digest
 		if c.hysteria != nil {
 			request.Applied = request.Applied && c.hysteria.Matches(c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest)
 		}
@@ -423,7 +423,7 @@ func (c *Client) reportStatus(ctx context.Context) error {
 		if !status.RestrictionAppliedAt.IsZero() {
 			request.RestrictionAppliedAt = status.RestrictionAppliedAt.UTC().Format(time.RFC3339Nano)
 		}
-		request.Applied = !requiresXray(c.identity.DesiredState) && c.hysteria.Matches(c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest)
+		request.Applied = status.Error == "" && !requiresXray(c.identity.DesiredState) && c.hysteria.Matches(c.identity.AuthorityEpoch, c.identity.Revision, c.identity.Digest)
 		request.ApplyError = status.Error
 		if !request.Applied && request.ApplyError == "" {
 			request.ApplyError = protocol.ErrorCorePending

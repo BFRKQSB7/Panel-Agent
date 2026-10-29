@@ -591,11 +591,12 @@ func (m *CoreManager) apply(ctx context.Context, epoch string, revision uint64, 
 		candidate.PeriodPolicies = floor.PeriodPolicies
 	}
 	if current := m.state.Current; current != nil && current.AuthorityEpoch == epoch && current.Revision == revision && current.Digest == digest && current.ConfigHash == candidate.ConfigHash {
-		if !current.HasSource || confirmedPolicy && m.state.PermissionDigest != digest {
+		if !current.HasSource || confirmedPolicy && (m.state.PermissionDigest != digest || m.state.LastError != "") {
 			next := m.state
 			next.Current = candidate
 			if confirmedPolicy {
 				next.PermissionDigest = digest
+				next.LastError = ""
 			}
 			return m.save(next)
 		}

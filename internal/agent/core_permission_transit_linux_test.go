@@ -89,6 +89,23 @@ func TestPermissionFloorPreservesOneHopAndFencesTransitRotation(t *testing.T) {
 				if !after.Running || after.Generation != before.Generation || *real.state.Process != process {
 					t.Fatal("unchanged local reconciliation restarted or removed One-Hop transport")
 				}
+				next := real.state
+				next.LastError = protocol.ErrorCoreConfigInvalid
+				if e = real.save(next); e != nil {
+					t.Fatal(e)
+				}
+				if e = real.ReconcileExpiration(ctx); e != nil {
+					t.Fatal(e)
+				}
+				if real.Status().Error == "" {
+					t.Fatal("offline local reconciliation erased an unresolved apply error")
+				}
+				if e = real.Apply(ctx, epoch, 1, digest, tc.desired); e != nil {
+					t.Fatal(e)
+				}
+				if real.Status().Error != "" || real.Status().Generation != before.Generation || *real.state.Process != process {
+					t.Fatal("authenticated unchanged snapshot did not clear the old apply failure without restarting")
+				}
 			}
 			// A rollback to the old transport must not recover the previous secret.
 			if tc.name == "entry" {
