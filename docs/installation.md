@@ -48,3 +48,5 @@ sudo ./scripts/cleanup.sh ./dist --role panel-agent
 ```
 
 systemd unit 的 `ProtectSystem=strict`、`ReadWritePaths`、`NoNewPrivileges`、项目级日志限额和固定服务用户共同限制运行时写入范围；不会改变主机全局 journal 保留策略。
+
+精简 Debian 13 的 128MiB VM 可能将 `/run` tmpfs 上限设为不足 16MiB，导致 systemd 以安全缓冲不足拒绝 `daemon-reload`。遇到这个具体错误时先用 `df -h /run` 核对，由管理员将该 tmpfs 上限配置为至少 24MiB；调整容量上限不会预分配这些内存，安装器不会自动修改系统挂载。小内存主机的候选程序应暂存到磁盘目录（例如 `/var/tmp`），避免把大二进制写入以 tmpfs 挂载的 `/tmp`。整机验收应记录这些挂载设置、物理内存、swap 和 OOM 计数。

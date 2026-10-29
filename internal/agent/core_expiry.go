@@ -90,23 +90,60 @@ func (m *CoreManager) renderWithPermissionFloor(desired protocol.DesiredState, c
 		return xray.RenderedConfig{}, err
 	}
 	allowed := map[string]map[string]protocol.ProxyCredential{}
+	allowedExits := map[string]string{}
 	for _, node := range floor.Nodes {
 		if node.Enabled {
+			allowedExits[node.ID] = node.ExitMachineID
 			allowed[node.ID] = map[string]protocol.ProxyCredential{}
 			for _, credential := range node.Credentials {
 				allowed[node.ID][credential.UserID+"\x00"+credential.UUID] = credential
 			}
 		}
 	}
-	filtered := protocol.DesiredState{Nodes: append([]protocol.DesiredNode{}, desired.Nodes...), QuotaRestrictions: desired.QuotaRestrictions}
+	filtered := desired
+	filtered.Nodes = append([]protocol.DesiredNode{}, desired.Nodes...)
+	filtered.PeriodPolicies = floor.PeriodPolicies
+	filtered.TrafficReportingEnabled = floor.TrafficReportingEnabled
 	filtered.QuotaRestrictions, err = protocol.MergeQuotaRestrictions(floor.QuotaRestrictions, desired.QuotaRestrictions)
 	if err != nil {
 		return xray.RenderedConfig{}, err
 	}
+	// Keep complete transport metadata during local expiry checks, while an old
+	// LKG may retain only transit secrets and Exit grants still in the floor.
+	transit := map[string]bool{}
+	filtered.TransitOutbounds = []protocol.TransitOutbound{}
+	for _, outbound := range desired.TransitOutbounds {
+		for _, current := range floor.TransitOutbounds {
+			if outbound.ExitMachineID == current.ExitMachineID && outbound.UUID == current.UUID {
+				filtered.TransitOutbounds = append(filtered.TransitOutbounds, outbound)
+				transit[outbound.ExitMachineID] = true
+				break
+			}
+		}
+	}
+	if desired.Exit != nil {
+		filtered.Exit = nil
+		if floor.Exit != nil && desired.Exit.MachineID == floor.Exit.MachineID {
+			exit := *desired.Exit
+			exit.Credentials = []protocol.TransitCredential{}
+			for _, credential := range desired.Exit.Credentials {
+				for _, current := range floor.Exit.Credentials {
+					if credential.EntryMachineID == current.EntryMachineID && credential.UUID == current.UUID {
+						exit.Credentials = append(exit.Credentials, current)
+						break
+					}
+				}
+			}
+			filtered.Exit = &exit
+		}
+	}
 	for i := range filtered.Nodes {
 		node := &filtered.Nodes[i]
 		grants, exists := allowed[node.ID]
-		node.Enabled = node.Enabled && exists
+		node.Enabled = node.Enabled && exists && node.ExitMachineID == allowedExits[node.ID]
+		if node.ExitMachineID != "" && !transit[node.ExitMachineID] {
+			node.Enabled = false
+		}
 		credentials := []protocol.ProxyCredential{}
 		for _, credential := range node.Credentials {
 			if current, ok := grants[credential.UserID+"\x00"+credential.UUID]; ok {
@@ -115,6 +152,16 @@ func (m *CoreManager) renderWithPermissionFloor(desired protocol.DesiredState, c
 		}
 		node.Credentials = credentials
 	}
+	kept := filtered.TransitOutbounds[:0]
+	for _, outbound := range filtered.TransitOutbounds {
+		for _, node := range filtered.Nodes {
+			if node.Enabled && node.ExitMachineID == outbound.ExitMachineID {
+				kept = append(kept, outbound)
+				break
+			}
+		}
+	}
+	filtered.TransitOutbounds = kept
 	return m.renderDesired(filtered)
 }
 
