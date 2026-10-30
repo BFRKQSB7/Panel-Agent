@@ -101,6 +101,7 @@ try {
         }
         Copy-Item -LiteralPath (Join-Path $repository 'docs') -Destination (Join-Path $bundle 'docs') -Recurse
         Copy-Item -LiteralPath (Join-Path $repository 'README.md') -Destination (Join-Path $bundle 'README.md')
+        Copy-Item -LiteralPath (Join-Path $repository 'README.zh-CN.md') -Destination (Join-Path $bundle 'README.zh-CN.md')
         $manifest = [ordered]@{version=$version;platform="linux/$arch";source_revision=$revision;source_dirty=$sourceDirty;source_tree_sha256=$sourceDigest;go=$goVersion;status='unaccepted_local_candidate';project_license='not_declared';xray=[ordered]@{version='26.10.21';package_sha256=$expected;source='https://github.com/XTLS/Xray-core/releases/tag/v26.10.21'};dependencies=$licenseIndex}
         if ($withHysteria) { $manifest['hysteria'] = $hysteriaManifest }
         [IO.File]::WriteAllText((Join-Path $bundle 'manifest.json'),($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
