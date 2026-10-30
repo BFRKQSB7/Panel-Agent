@@ -27,6 +27,7 @@ type Metadata struct {
 	MachineID      string                  `json:"machine_id"`
 	Epoch          string                  `json:"ledger_epoch"`
 	Allocated      uint64                  `json:"allocated_close_seq,string"`
+	Created        uint64                  `json:"created_segments,string"`
 	HighWater      time.Time               `json:"high_water"`
 	InstallationID string                  `json:"installation_id,omitempty"`
 	Authority      string                  `json:"authority_epoch,omitempty"`
@@ -58,7 +59,7 @@ CREATE TABLE IF NOT EXISTS watermarks(source TEXT NOT NULL,label TEXT NOT NULL,s
 CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS policies(id TEXT PRIMARY KEY,scope_key TEXT NOT NULL,effective_at TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(scope_key,effective_at));
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,code TEXT NOT NULL,start TEXT NOT NULL,end TEXT NOT NULL);
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 `
 
 func Open(dataDir, machine string) (*Store, error) {
@@ -145,7 +146,7 @@ func Open(dataDir, machine string) (*Store, error) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return nil, err
 	}
-	if version > 1 {
+	if version > 2 {
 		return nil, ErrLedger
 	}
 	tx, err := db.Begin()
@@ -192,6 +193,9 @@ func readMeta(tx *sql.Tx) (Metadata, error) {
 	err := tx.QueryRow("SELECT body FROM ledger_meta WHERE id=1").Scan(&b)
 	if err == nil {
 		err = json.Unmarshal([]byte(b), &m)
+	}
+	if err == nil && m.Created >= 1<<48 {
+		err = ErrLedger
 	}
 	return m, err
 }
@@ -368,6 +372,13 @@ func Inspect(ctx context.Context, dataDir string) (Diagnostic, error) {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	var version int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return Diagnostic{}, err
+	}
+	if version < 1 || version > 2 {
+		return Diagnostic{}, ErrLedger
+	}
 	s := Store{db: db, path: path}
 	return s.Diagnostic(ctx)
 }

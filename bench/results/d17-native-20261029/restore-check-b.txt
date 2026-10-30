@@ -1,0 +1,10 @@
+ORIGINAL_HYSTERIA_SERVICE_RESTORED
+{
+  "active": "active",
+  "enabled": "enabled",
+  "config_and_binary_unchanged": true,
+  "original_pid": "204037",
+  "restored_pid": "204037",
+  "finished_at": 1793321490.5380807
+}MainPID=204037
+ActiveState=active

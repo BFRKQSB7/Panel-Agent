@@ -1,0 +1,3 @@
+active
+State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+UNCONN 0      0            0.0.0.0:443       0.0.0.0:*    users:(("hysteria",pid=213103,fd=4))

@@ -292,10 +292,7 @@ func (s *Store) Ingest(ctx context.Context, sample Sample) error {
 			}
 		}
 		if activeID == "" {
-			id, err := security.NewUUID()
-			if err != nil {
-				return err
-			}
+			meta.Created++
 			start := from
 			if sample.PolicyAppliedAt.After(start) {
 				start = sample.PolicyAppliedAt
@@ -308,7 +305,12 @@ func (s *Store) Ingest(ctx context.Context, sample Sample) error {
 					start = p.Start
 				}
 			}
-			segment = protocol.TrafficSegment{Key: protocol.SegmentKey{MachineID: meta.MachineID, LedgerEpoch: meta.Epoch, StreamID: streamID, SegmentID: id}, Stream: reading.Stream, Periods: periods, Start: start, Through: at}
+			segment = protocol.TrafficSegment{Key: protocol.SegmentKey{MachineID: meta.MachineID, LedgerEpoch: meta.Epoch, StreamID: streamID}, Stream: reading.Stream, Periods: periods, Start: start, Through: at}
+			id, err := protocol.NewTrafficSegmentID(meta.Created, segment)
+			if err != nil {
+				return err
+			}
+			segment.Key.SegmentID = id
 			if _, err = tx.Exec("UPDATE streams SET active=? WHERE id=?", id, streamID); err != nil {
 				return err
 			}

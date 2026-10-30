@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
@@ -22,6 +23,9 @@ import (
 
 func TestExtensionImportEnableDisableAndDeletePage(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	hash, err := security.HashAdminPassword([]byte("d13-extension-password"))
 	if err != nil {
 		t.Fatal(err)

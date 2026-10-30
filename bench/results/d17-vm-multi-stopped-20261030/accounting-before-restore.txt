@@ -1,0 +1,5 @@
+VM_MACHINE_USAGE name=node128 bytes=140160 generation=3
+VM_MACHINE_USAGE name=exit128 bytes=93440 generation=2
+VM_MACHINE_USAGE name=panel512 bytes=96400 generation=4
+VM_MACHINE_USAGE name=arm128 bytes=140160 generation=2
+VM_ACCOUNTING_OK users=20 active_nodes=8 machine_scopes=4 global_equals_user_entries=true

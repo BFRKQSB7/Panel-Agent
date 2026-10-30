@@ -1,0 +1,11 @@
+VM_SOAK_PROGRESS elapsed_seconds=30.0 workers=5 requests=140 response_bytes=290500
+VM_SOAK_PROGRESS elapsed_seconds=60.0 workers=5 requests=282 response_bytes=585150
+VM_SOAK_PROGRESS elapsed_seconds=90.0 workers=5 requests=412 response_bytes=854900
+VM_SOAK_PROGRESS elapsed_seconds=120.0 workers=5 requests=551 response_bytes=1143325
+VM_SOAK_PROGRESS elapsed_seconds=150.0 workers=5 requests=693 response_bytes=1437975
+VM_SOAK_PROGRESS elapsed_seconds=180.0 workers=5 requests=819 response_bytes=1699425
+VM_SOAK_PROGRESS elapsed_seconds=210.0 workers=5 requests=957 response_bytes=1985775
+VM_SOAK_PROGRESS elapsed_seconds=240.0 workers=5 requests=1099 response_bytes=2280425
+VM_SOAK_PROGRESS elapsed_seconds=270.0 workers=5 requests=1235 response_bytes=2562625
+VM_SOAK_PROGRESS elapsed_seconds=300.0 workers=5 requests=1366 response_bytes=2834450
+VM_SOAK_PASS elapsed_seconds=301.1 workers=5 requests=1367 response_bytes=2836525

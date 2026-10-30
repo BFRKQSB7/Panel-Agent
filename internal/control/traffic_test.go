@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -149,6 +150,64 @@ func TestTrafficRecoveryAndIngestHTTPSRoutesAuthenticateAndACK(t *testing.T) {
 		t.Fatalf("plaintext traffic endpoint status = %d", response.StatusCode)
 	}
 	response.Body.Close()
+}
+
+func TestTrafficRetentionRequiresAdminAndCSRF(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := security.HashAdminPassword([]byte("retention-admin-password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = InitializeAdmin(dir, hash); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(Config{DataDir: dir, Listen: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	h := httptest.NewTLSServer(s.Handler())
+	defer h.Close()
+	client := h.Client()
+	endpoint := h.URL + "/api/admin/traffic/retention"
+	response, err := client.Get(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous: %d", response.StatusCode)
+	}
+	client.Jar, _ = cookiejar.New(nil)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	loginControlAdmin(t, client, h.URL, "retention-admin-password")
+	csrf := fetchMachinesCSRF(t, client, h.URL)
+	body := `{"raw_days":2,"raw_rows_per_machine":10,"closed_rows_per_machine":2,"hour_days":2,"day_days":10,"month_months":2}`
+	for _, token := range []string{"", csrf} {
+		req, _ := http.NewRequest(http.MethodPut, endpoint, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", h.URL)
+		req.Header.Set("X-CSRF-Token", token)
+		response, err = client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		want := http.StatusOK
+		if token == "" {
+			want = http.StatusForbidden
+		}
+		if response.StatusCode != want {
+			t.Fatalf("update: %d want %d", response.StatusCode, want)
+		}
+	}
+	r, err := s.store.GetTrafficRetention(t.Context())
+	if err != nil || r.RawRows != 10 {
+		t.Fatalf("not persisted: %+v %v", r, err)
+	}
 }
 
 func mustControlUUID(t *testing.T) string {

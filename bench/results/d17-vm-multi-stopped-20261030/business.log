@@ -1,0 +1,9 @@
+VM_ROUTE_OK name=vm-reality-0 users=20
+VM_ROUTE_OK name=vm-reality-1 users=20
+VM_ROUTE_OK name=vm-reality-2 users=20
+VM_ROUTE_OK name=vm-hy2-panel512 users=20
+VM_ROUTE_OK name=vm-hy2-panel512-extra users=20
+VM_ROUTE_OK name=vm-reality-arm users=20
+VM_ROUTE_OK name=vm-reality-arm-hop users=20
+VM_ROUTE_OK name=vm-trojan-arm users=20
+VM_PROXY_REQUESTS=160 response_bytes=332000

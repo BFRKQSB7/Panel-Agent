@@ -244,6 +244,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /s/{token}/{format}", s.handleSubscription)
 	mux.HandleFunc("GET /assets/tokens.js", s.handleTokenScript)
 	mux.HandleFunc("/api/settings", s.handleSettingsAPI)
+	mux.HandleFunc("/api/admin/traffic/retention", s.handleTrafficRetentionAPI)
 	mux.HandleFunc("POST /api/v1/machines/register", s.handleMachineRegister)
 	mux.HandleFunc("POST /api/v1/machines/recover", s.handleMachineRecovery)
 	mux.HandleFunc("POST /api/v1/agent/desired-state", s.handleDesiredState)

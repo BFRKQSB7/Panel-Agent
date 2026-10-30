@@ -1,0 +1,7 @@
+Linux NYRO 6.12.107+deb13-arm64 #1 SMP Debian 6.12.107-1 (2026-08-29) aarch64 GNU/Linux
+               total        used        free      shared  buff/cache   available
+Mem:              90          47          11           0          38          42
+Swap:              0           0           0
+Filesystem     1M-blocks  Used Available Use% Mounted on
+/dev/vda             974   503       404  56% /
+oom_kill 0

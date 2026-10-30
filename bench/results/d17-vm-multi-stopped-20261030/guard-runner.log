@@ -1,0 +1,63 @@
+VM_FIXTURE_SEEDED machines=3 reality_nodes=3 hy2_nodes=2 users=20
+EXIT_ONLY_PHASE_REQUESTED
+SECOND_HYSTERIA_ADDED target=panel512 two_official_instances=true
+Created symlink '/run/systemd/system/apt-daily.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.timer' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily.service' → '/dev/null'.
+Created symlink '/run/systemd/system/apt-daily-upgrade.service' → '/dev/null'.
+已移除：/var/lib/panel-agent/control
+已移除：/var/lib/panel-agent/control/ownership.json
+已移除：/var/log/panel-agent/control.log
+已移除：/etc/systemd/system/panel-agent-control.service
+已移除：/etc/systemd/system/panel-agent-control-cleanup.service
+已移除：/etc/systemd/system/panel-agent-control-cleanup.timer
+已移除：/opt/panel-agent/bin/control
+已移除：/var/lib/panel-agent/agent
+已移除：/var/lib/panel-agent/agent/ownership.json
+已移除：/var/log/panel-agent/agent.log
+已移除：/etc/systemd/system/panel-agent-agent.service
+已移除：/etc/systemd/system/panel-agent-agent-cleanup.service
+已移除：/etc/systemd/system/panel-agent-agent-cleanup.timer
+已移除：/opt/panel-agent/bin/control-agent
+已移除：/var/lib/panel-agent/agent/runtime
+已移除：/var/lib/panel-agent/agent/runtime/xray
+已移除：/var/lib/panel-agent/agent/runtime/hysteria
+已安装 control：数据=/var/lib/panel-agent/control
+已安装 agent：数据=/var/lib/panel-agent/agent
+已移除：/var/lib/panel-agent/agent
+已移除：/var/lib/panel-agent/agent/ownership.json
+已移除：/var/log/panel-agent/agent.log
+已移除：/etc/systemd/system/panel-agent-agent.service
+已移除：/etc/systemd/system/panel-agent-agent-cleanup.service
+已移除：/etc/systemd/system/panel-agent-agent-cleanup.timer
+已移除：/opt/panel-agent/bin/control-agent
+已移除：/var/lib/panel-agent/agent/runtime
+已移除：/var/lib/panel-agent/agent/runtime/xray
+已移除：/var/lib/panel-agent/agent/runtime/hysteria
+已安装 agent：数据=/var/lib/panel-agent/agent
+已移除：/var/lib/panel-agent/agent
+已移除：/var/lib/panel-agent/agent/ownership.json
+已移除：/var/log/panel-agent/agent.log
+已移除：/etc/systemd/system/panel-agent-agent.service
+已移除：/etc/systemd/system/panel-agent-agent-cleanup.service
+已移除：/etc/systemd/system/panel-agent-agent-cleanup.timer
+已移除：/opt/panel-agent/bin/control-agent
+已移除：/var/lib/panel-agent/agent/runtime
+已移除：/var/lib/panel-agent/agent/runtime/xray
+已移除：/var/lib/panel-agent/agent/runtime/hysteria
+已安装 agent：数据=/var/lib/panel-agent/agent
+已安装 agent：数据=/var/lib/panel-agent/agent
+FOUR_MACHINE_BUSINESS_AND_RESTORE_PASS
+FOUR_VM_CORE_IDENTITIES_CAPTURED start

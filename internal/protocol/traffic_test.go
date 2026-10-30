@@ -17,6 +17,32 @@ const tid2 = "22222222-2222-4222-8222-222222222222"
 const tid3 = "33333333-3333-4333-8333-333333333333"
 const tid4 = "44444444-4444-4444-8444-444444444444"
 
+func TestCreationIdentityBindsScopesAndCanonicalPeriodOrder(t *testing.T) {
+	s := testSegment(t, false)
+	id, err := NewTrafficSegmentID(1, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Key.SegmentID = id
+	if s.Validate() != nil || TrafficOrdinal(id) != 1 {
+		t.Fatal("creation identity rejected")
+	}
+	s.Periods[0], s.Periods[2] = s.Periods[2], s.Periods[0]
+	if s.Validate() != nil {
+		t.Fatal("period ordering changed identity")
+	}
+	s.Stream.UserID = tid4
+	if s.Validate() == nil {
+		t.Fatal("scope tampering accepted")
+	}
+	s = testSegment(t, false)
+	s.Key.SegmentID = id
+	s.Start = s.Start.Add(time.Second)
+	if s.Validate() == nil {
+		t.Fatal("start tampering accepted")
+	}
+}
+
 func testSegment(t *testing.T, transit bool) TrafficSegment {
 	t.Helper()
 	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)

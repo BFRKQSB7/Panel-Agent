@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = [IO.Path]::GetFullPath($OutputDirectory)
+if (-not $output.StartsWith($repository + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw '发行产物必须位于项目目录内。' }
 $withHysteria = [bool]($HysteriaAmd64Binary -or $HysteriaArm64Binary -or $HysteriaLicense)
 if ($withHysteria -and (-not $HysteriaAmd64Binary -or -not $HysteriaArm64Binary -or -not $HysteriaLicense)) { throw 'Hysteria 打包需要同时提供两个架构的官方二进制与许可证。' }
 if ($withHysteria -and (Get-FileHash -Algorithm SHA256 -LiteralPath $HysteriaLicense).Hash.ToLowerInvariant() -ne 'b279cfdac4db4b077f0660b5d8156d50a8bc7bd410036dc356499af43c4e84f5') { throw '官方 Hysteria 许可证校验失败。' }
@@ -32,6 +33,11 @@ try {
     $goVersion = (& go version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $goVersion -notmatch '^go version go1\.27\.1 ') { throw '要求 Go 1.27.1。' }
     $revision = (& git rev-parse HEAD | Out-String).Trim()
+    $sourceDirty = [bool]((& git status --porcelain | Out-String).Trim())
+    $sourceFiles = @(& git ls-files --cached --others --exclude-standard | Sort-Object -Unique)
+    $sourceHashes = @($sourceFiles | Where-Object { Test-Path -LiteralPath (Join-Path $repository $_) -PathType Leaf } | ForEach-Object { (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repository $_)).Hash.ToLowerInvariant() + '  ' + $_ })
+    $sourceBytes = [Text.Encoding]::UTF8.GetBytes(($sourceHashes -join "`n") + "`n")
+    $sourceDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($sourceBytes)).ToLowerInvariant()
     $epoch = (& git show -s --format=%ct HEAD | Out-String).Trim()
     New-Item -ItemType Directory -Path $output | Out-Null
     $archives = @()
@@ -95,7 +101,7 @@ try {
         }
         Copy-Item -LiteralPath (Join-Path $repository 'docs') -Destination (Join-Path $bundle 'docs') -Recurse
         Copy-Item -LiteralPath (Join-Path $repository 'README.md') -Destination (Join-Path $bundle 'README.md')
-        $manifest = [ordered]@{version=$version;platform="linux/$arch";source_revision=$revision;go=$goVersion;status='unaccepted_local_candidate';project_license='not_declared';xray=[ordered]@{version='26.10.21';package_sha256=$expected;source='https://github.com/XTLS/Xray-core/releases/tag/v26.10.21'};dependencies=$licenseIndex}
+        $manifest = [ordered]@{version=$version;platform="linux/$arch";source_revision=$revision;source_dirty=$sourceDirty;source_tree_sha256=$sourceDigest;go=$goVersion;status='unaccepted_local_candidate';project_license='not_declared';xray=[ordered]@{version='26.10.21';package_sha256=$expected;source='https://github.com/XTLS/Xray-core/releases/tag/v26.10.21'};dependencies=$licenseIndex}
         if ($withHysteria) { $manifest['hysteria'] = $hysteriaManifest }
         [IO.File]::WriteAllText((Join-Path $bundle 'manifest.json'),($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
         $checksums = @(Get-ChildItem -LiteralPath $bundle -File -Recurse | Sort-Object FullName | ForEach-Object { (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetRelativePath($bundle,$_.FullName).Replace('\','/') })

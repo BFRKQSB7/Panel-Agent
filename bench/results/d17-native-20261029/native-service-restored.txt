@@ -1,0 +1,19 @@
+{
+  "active": "active",
+  "enabled": "enabled",
+  "config_and_binary_unchanged": true,
+  "original_pid": "204037",
+  "restored_pid": "213103",
+  "finished_at": 1793323131.7856479
+}MainPID=213103
+ActiveState=active
+UnitFileState=enabled
+State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+UNCONN 0      0            0.0.0.0:443       0.0.0.0:*    users:(("hysteria",pid=213103,fd=4))
+{
+  "elapsed_seconds": 519.306293348,
+  "exit_code": 0,
+  "reason": "completed",
+  "started_at": "2026-10-30T01:10:12.78776181Z",
+  "updated_at": "2026-10-30T01:18:52.094054718Z"
+}

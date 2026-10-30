@@ -1,0 +1,40 @@
+VM_SOAK_PROGRESS elapsed_seconds=2670.0 workers=5 requests=12608 response_bytes=26161600
+VM_SOAK_PROGRESS elapsed_seconds=2700.0 workers=5 requests=12749 response_bytes=26454175
+VM_SOAK_PROGRESS elapsed_seconds=2730.0 workers=5 requests=12888 response_bytes=26742600
+VM_SOAK_PROGRESS elapsed_seconds=2760.0 workers=5 requests=13030 response_bytes=27037250
+VM_SOAK_PROGRESS elapsed_seconds=2790.0 workers=5 requests=13167 response_bytes=27321525
+VM_SOAK_PROGRESS elapsed_seconds=2820.0 workers=5 requests=13288 response_bytes=27572600
+VM_SOAK_PROGRESS elapsed_seconds=2850.0 workers=5 requests=13427 response_bytes=27861025
+VM_SOAK_PROGRESS elapsed_seconds=2880.0 workers=5 requests=13565 response_bytes=28147375
+VM_SOAK_PROGRESS elapsed_seconds=2910.0 workers=5 requests=13707 response_bytes=28442025
+VM_SOAK_PROGRESS elapsed_seconds=2940.0 workers=5 requests=13843 response_bytes=28724225
+VM_SOAK_PROGRESS elapsed_seconds=2970.0 workers=5 requests=13984 response_bytes=29016800
+VM_SOAK_PROGRESS elapsed_seconds=3000.0 workers=5 requests=14125 response_bytes=29309375
+VM_SOAK_PROGRESS elapsed_seconds=3030.0 workers=5 requests=14266 response_bytes=29601950
+VM_SOAK_PROGRESS elapsed_seconds=3060.0 workers=5 requests=14408 response_bytes=29896600
+VM_SOAK_PROGRESS elapsed_seconds=3090.0 workers=5 requests=14548 response_bytes=30187100
+VM_SOAK_PROGRESS elapsed_seconds=3120.0 workers=5 requests=14685 response_bytes=30471375
+VM_SOAK_PROGRESS elapsed_seconds=3150.0 workers=5 requests=14826 response_bytes=30763950
+VM_SOAK_PROGRESS elapsed_seconds=3180.0 workers=5 requests=14967 response_bytes=31056525
+VM_SOAK_PROGRESS elapsed_seconds=3210.0 workers=5 requests=15107 response_bytes=31347025
+VM_SOAK_PROGRESS elapsed_seconds=3240.0 workers=5 requests=15248 response_bytes=31639600
+VM_SOAK_PROGRESS elapsed_seconds=3270.0 workers=5 requests=15389 response_bytes=31932175
+VM_SOAK_PROGRESS elapsed_seconds=3300.0 workers=5 requests=15528 response_bytes=32220600
+VM_SOAK_PROGRESS elapsed_seconds=3330.0 workers=5 requests=15667 response_bytes=32509025
+VM_SOAK_PROGRESS elapsed_seconds=3360.0 workers=5 requests=15810 response_bytes=32805750
+VM_SOAK_PROGRESS elapsed_seconds=3390.0 workers=5 requests=15946 response_bytes=33087950
+VM_SOAK_PROGRESS elapsed_seconds=3420.0 workers=5 requests=16087 response_bytes=33380525
+VM_SOAK_PROGRESS elapsed_seconds=3450.0 workers=5 requests=16227 response_bytes=33671025
+VM_SOAK_PROGRESS elapsed_seconds=3480.0 workers=5 requests=16367 response_bytes=33961525
+VM_SOAK_PROGRESS elapsed_seconds=3510.0 workers=5 requests=16508 response_bytes=34254100
+VM_SOAK_PROGRESS elapsed_seconds=3540.0 workers=5 requests=16647 response_bytes=34542525
+VM_SOAK_PROGRESS elapsed_seconds=3570.0 workers=5 requests=16787 response_bytes=34833025
+VM_SOAK_PROGRESS elapsed_seconds=3600.0 workers=5 requests=16927 response_bytes=35123525
+VM_SOAK_PROGRESS elapsed_seconds=3630.0 workers=5 requests=17066 response_bytes=35411950
+panic: vm-reality-arm-hop HTTP: Get "http://1.1.1.1/cdn-cgi/trace": EOF
+
+goroutine 1 [running]:
+main.must(...)
+	E:/project/Panel-Agent/.work/combined-probe/main.go:28
+main.main()
+	E:/project/Panel-Agent/.work/combined-probe/main.go:70 +0xcd3

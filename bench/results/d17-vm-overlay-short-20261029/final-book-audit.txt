@@ -1,0 +1,1 @@
+FULL_BOOK_ACCOUNTING_OK machines=4 segments=141 all_sampled_totals_equal_committed=true

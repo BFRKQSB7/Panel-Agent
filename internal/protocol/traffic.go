@@ -2,8 +2,13 @@ package protocol
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
+	"strconv"
 	"time"
 
 	"panel-agent.local/panel-agent/internal/period"
@@ -83,11 +88,51 @@ type SegmentKey struct {
 }
 
 func (k SegmentKey) Validate() error {
-	if !security.IsUUIDv4(k.MachineID) || !security.IsUUIDv4(k.LedgerEpoch) || !security.IsUUIDv4(k.StreamID) || !security.IsUUIDv4(k.SegmentID) {
+	if !security.IsUUIDv4(k.MachineID) || !security.IsUUIDv4(k.LedgerEpoch) || !security.IsUUIDv4(k.StreamID) || !validTrafficID(k.SegmentID) {
 		return ErrTraffic
 	}
 	return nil
 }
+
+// A creation UUIDv8 plus SHA-256 binds immutable scope/period metadata even
+// after detailed tombstones are compacted. Old UUIDv4 identities remain valid.
+func NewTrafficSegmentID(ordinal uint64, segment TrafficSegment) (string, error) {
+	if ordinal == 0 || ordinal >= 1<<48 {
+		return "", ErrTraffic
+	}
+	ids := make([]string, 0, len(segment.Periods))
+	for _, p := range segment.Periods {
+		ids = append(ids, p.ID)
+	}
+	sort.Strings(ids)
+	binding := struct {
+		Ordinal                  uint64
+		Machine, Epoch, StreamID string
+		Stream                   TrafficStream
+		Periods                  []string
+		Start                    string
+	}{ordinal, segment.Key.MachineID, segment.Key.LedgerEpoch, segment.Key.StreamID, segment.Stream, ids, segment.Start.UTC().Format(time.RFC3339Nano)}
+	data, err := json.Marshal(binding)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(data)
+	return fmt.Sprintf("00000000-0000-8000-8000-%012x.%x", ordinal, digest), nil
+}
+
+func TrafficOrdinal(id string) uint64 {
+	if len(id) != 101 || id[:24] != "00000000-0000-8000-8000-" || id[36] != '.' {
+		return 0
+	}
+	n, err := strconv.ParseUint(id[24:36], 16, 48)
+	digest, e := hex.DecodeString(id[37:])
+	if err != nil || e != nil || hex.EncodeToString(digest) != id[37:] || fmt.Sprintf("%012x", n) != id[24:36] {
+		return 0
+	}
+	return n
+}
+
+func validTrafficID(id string) bool { return security.IsUUIDv4(id) || TrafficOrdinal(id) != 0 }
 
 type TrafficStream struct {
 	Kind        string `json:"kind"`
@@ -150,6 +195,12 @@ type ObservationWindow struct {
 }
 
 func (s TrafficSegment) Validate() error {
+	if ordinal := TrafficOrdinal(s.Key.SegmentID); ordinal != 0 {
+		expected, err := NewTrafficSegmentID(ordinal, s)
+		if err != nil || expected != s.Key.SegmentID {
+			return ErrTraffic
+		}
+	}
 	if u := s.Uncertainty; u != nil && (!period.ValidUTC(u.From) || !period.ValidUTC(u.To) || u.To.Before(u.From) || u.Reason == "") {
 		return ErrTraffic
 	}

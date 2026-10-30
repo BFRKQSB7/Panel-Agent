@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -32,8 +34,36 @@ func TestRealCoreDurableLedgerAndLostACK(t *testing.T) {
 	if binary == "" {
 		t.Skip("requires explicitly authorized pinned Core")
 	}
+	// Preserve production Freedom rules while giving this test a deterministic
+	// public destination. The namespace affects only the child test process.
+	if os.Getenv("PANEL_AGENT_TEST_PUBLIC_ORIGIN") == "" {
+		child := exec.Command("unshare", "--net", "sh", "-c", `ip link set lo up && ip addr add 1.1.1.1/32 dev lo && exec "$@"`, "sh", os.Args[0], "-test.run=^TestRealCoreDurableLedgerAndLostACK$", "-test.v")
+		child.Env = append(os.Environ(), "PANEL_AGENT_TEST_PUBLIC_ORIGIN=1.1.1.1")
+		output, err := child.CombinedOutput()
+		if err != nil {
+			t.Fatalf("isolated accounting test: %v\n%s", err, output)
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "controlled Reality target") }))
+	target.TLS = &tls.Config{MinVersion: tls.VersionTLS13, CurvePreferences: []tls.CurveID{tls.X25519}}
+	target.EnableHTTP2 = true
+	target.StartTLS()
+	defer target.Close()
+	payload := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "Example Domain controlled accounting payload")
+	}))
+	originHost := os.Getenv("PANEL_AGENT_TEST_PUBLIC_ORIGIN")
+	listener, err := net.Listen("tcp", net.JoinHostPort(originHost, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.Listener.Close()
+	payload.Listener = listener
+	payload.Start()
+	defer payload.Close()
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -62,7 +92,7 @@ func TestRealCoreDurableLedgerAndLostACK(t *testing.T) {
 	})
 	key, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	label := "u-" + user + "-n-" + node
-	desired := protocol.DesiredState{Nodes: []protocol.DesiredNode{{ID: node, Name: "ledger-real", PublicHost: "127.0.0.1", PublicPort: 19449, ListenHost: "127.0.0.1", ListenPort: 19449, Enabled: true, Reality: protocol.RealityConfig{ServerName: "www.cloudflare.com", Target: "www.cloudflare.com:443", PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), ShortID: "0123456789abcdef"}, Credentials: []protocol.ProxyCredential{{UserID: user, UUID: uuid, Email: label}}}}}
+	desired := protocol.DesiredState{Nodes: []protocol.DesiredNode{{ID: node, Name: "ledger-real", PublicHost: "127.0.0.1", PublicPort: 19449, ListenHost: "127.0.0.1", ListenPort: 19449, Enabled: true, Reality: protocol.RealityConfig{ServerName: "example.com", Target: target.Listener.Addr().String(), PrivateKey: base64.RawURLEncoding.EncodeToString(key.Bytes()), PublicKey: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), ShortID: "0123456789abcdef"}, Credentials: []protocol.ProxyCredential{{UserID: user, UUID: uuid, Email: label}}}}}
 	for _, scope := range []period.Scope{{Kind: "user", UserID: user}, {Kind: "user_node", UserID: user, NodeID: node}, {Kind: "machine", MachineID: machine}} {
 		p, err := period.New(scope, 1, time.Unix(0, 0).UTC(), period.DefaultMonthly(1))
 		if err != nil {
@@ -78,13 +108,14 @@ func TestRealCoreDurableLedgerAndLostACK(t *testing.T) {
 		}
 	}
 	apply(1)
-	clientConfig := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": 19450, "protocol": "socks", "settings": map[string]any{"auth": "noauth"}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": 19449, "users": []any{map[string]any{"id": uuid, "encryption": "none"}}}}}, "streamSettings": map[string]any{"network": "raw", "security": "reality", "realitySettings": map[string]any{"serverName": "www.cloudflare.com", "fingerprint": "chrome", "publicKey": desired.Nodes[0].Reality.PublicKey, "shortId": "0123456789abcdef"}}}}}
+	clientConfig := map[string]any{"log": map[string]any{"loglevel": "debug"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": 19450, "protocol": "socks", "settings": map[string]any{"auth": "noauth"}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": 19449, "users": []any{map[string]any{"id": uuid, "encryption": "none"}}}}}, "streamSettings": map[string]any{"network": "raw", "security": "reality", "realitySettings": map[string]any{"serverName": "example.com", "fingerprint": "chrome", "publicKey": desired.Nodes[0].Reality.PublicKey, "shortId": "0123456789abcdef"}}}}}
 	data, _ := json.Marshal(clientConfig)
 	path := filepath.Join(dir, "reality-client.json")
 	if err := storage.WritePrivateAtomic(path, data); err != nil {
 		t.Fatal(err)
 	}
-	clientProcess, err := startCoreCommand(binary, path)
+	clientLog := filepath.Join(dir, "reality-client.log")
+	clientProcess, err := startCoreCommand(binary, path, clientLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +145,14 @@ func TestRealCoreDurableLedgerAndLostACK(t *testing.T) {
 	traffic := func(n int) {
 		t.Helper()
 		for i := 0; i < n; i++ {
-			req, _ := http.NewRequestWithContext(ctx, "GET", "https://example.com/", nil)
+			req, _ := http.NewRequestWithContext(ctx, "GET", payload.URL, nil)
 			res, err := httpClient.Do(req)
 			if err != nil {
+				for _, p := range []string{clientLog, m.logPath} {
+					if b, e := os.ReadFile(p); e == nil {
+						t.Logf("%s: %s", filepath.Base(p), b)
+					}
+				}
 				t.Fatal(err)
 			}
 			body, err := io.ReadAll(res.Body)

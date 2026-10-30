@@ -21,7 +21,7 @@ import (
 )
 
 func TestAgentProgramUpdatePreservesIdentityAndUnacknowledgedLedger(t *testing.T) {
-	for _, scenario := range []string{"success", "check-failure", "health-failure", "crash-swapped", "crash-committed", "busy", "real-program"} {
+	for _, scenario := range []string{"success", "check-failure", "legacy-reader", "health-failure", "crash-swapped", "crash-committed", "busy", "real-program"} {
 		t.Run(scenario, func(t *testing.T) {
 			if scenario == "real-program" && os.Getenv("PANEL_AGENT_TEST_AGENT_PROGRAM") == "" {
 				t.Skip("requires explicit built Agent executable")
@@ -171,7 +171,10 @@ func TestAgentProgramCandidateWorker(t *testing.T) {
 		fmt.Println("Control-Agent 0.1.0")
 		os.Exit(0)
 	}
-	if len(args) != 4 || args[1] != "check" || args[2] != "--data-dir" {
+	if scenario == "legacy-reader" {
+		os.Exit(1)
+	}
+	if len(args) != 5 || args[1] != "check" || args[2] != "--data-dir" || args[4] != "--require-ledger-schema=2" {
 		t.Fatal("unexpected check invocation")
 	}
 	if err := CheckProgramData(context.Background(), args[3]); err != nil {

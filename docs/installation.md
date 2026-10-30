@@ -2,6 +2,12 @@
 
 Panel-Agent 的安装器只接受已经由发布流程校验过的本地二进制和 Xray 文件，不接受任意 URL、Shell 或远程命令。支持 Debian 12+/Ubuntu 22.04+ 的 amd64/arm64 systemd 主机；安装器不会自动改 DNS、防火墙、sysctl、BBR 或 nginx。
 
+## 低配主机准备
+
+128MiB 整机须先确保操作系统本身能够启动。Debian 13 arm64 的默认大 initramfs 在测试 VM 上耗尽过引导内存；验收使用按实际虚拟硬件生成的精简 initramfs，保留完整 Debian 用户空间。系统包维护应与持续代理负载分开安排，避免 APT 后台维护争用低配机器内存；这不改变程序的功能或配额配置。
+
+systemd 重载要求 `/run/systemd` 至少保留 16MiB 空闲。128MiB 主机的默认 `/run` 上限可能不足，安装或更新前检查 `df -h /run`；空间不足时由管理员执行 `sudo mount -o remount,size=24m /run`。这是 tmpfs 的容量上限，不会预先占用 24MiB RAM；重启后的持久设置由主机管理员管理。
+
 ## 构建和安装
 
 在发布目录生成 Linux 二进制，并把已经固定版本、已核对 SHA-256 的 Xray 路径放入 `PANEL_AGENT_XRAY`：

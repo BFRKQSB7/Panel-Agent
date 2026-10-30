@@ -43,8 +43,12 @@ func run(args []string) error {
 	case "check":
 		flags := flag.NewFlagSet("check", flag.ContinueOnError)
 		dir := flags.String("data-dir", defaultDataDir(), "Agent data directory")
+		required := flags.Int("require-ledger-schema", 0, "minimum ledger reader version required by the updater")
 		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
 			return errors.New("用法：control-agent check [--data-dir PATH]")
+		}
+		if *required < 0 || *required > 2 {
+			return errors.New("此程序不支持所需的账本格式")
 		}
 		return agent.CheckProgramData(context.Background(), *dir)
 	case "update":

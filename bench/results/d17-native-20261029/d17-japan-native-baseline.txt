@@ -1,0 +1,11 @@
+Fri Oct 30 01:01:19 UTC 2026
+              total        used        free      shared  buff/cache   available
+Mem:           7941        7629         297          32          15         112
+Swap:          4096         887        3209
+low 0
+high 0
+max 0
+oom 0
+oom_kill 0
+oom_group_kill 0
+134217728

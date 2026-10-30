@@ -30,8 +30,8 @@ type agentProgramJournal struct {
 	Committed    bool   `json:"committed"`
 }
 
-// CheckProgramData is read-only: V1 binary updates do not migrate identity or
-// ledger formats. It may run while the updater holds the Agent process lock.
+// CheckProgramData is read-only. Ledger migration happens atomically on normal
+// startup, never during the candidate check holding the program update lock.
 func CheckProgramData(ctx context.Context, dataDir string) error {
 	s, err := openIdentityStore(dataDir)
 	if err != nil {
@@ -57,7 +57,7 @@ func CheckProgramData(ctx context.Context, dataDir string) error {
 }
 
 func checkAgentProgram(ctx context.Context, path, version, dataDir string) error {
-	for _, args := range [][]string{{"version"}, {"check", "--data-dir", dataDir}} {
+	for _, args := range [][]string{{"version"}, {"check", "--data-dir", dataDir, "--require-ledger-schema=2"}} {
 		probe, cancel := context.WithTimeout(ctx, 5*time.Second)
 		output := &limitedCoreOutput{limit: 4096}
 		command := exec.CommandContext(probe, path, args...)

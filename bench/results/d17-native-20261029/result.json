@@ -1,0 +1,61 @@
+{
+  "test": "D13-HY2 native four-host business and restore",
+  "date_local": "2026-10-29",
+  "agents": 3,
+  "client_hosts": 1,
+  "users": 20,
+  "entry_nodes": 3,
+  "http_requests_before_restore": 60,
+  "http_requests_after_restore": 60,
+  "http_response_bytes_before": 12482,
+  "http_response_bytes_after": 12452,
+  "udp_dns_queries": 80,
+  "protocols": [
+    "Reality one-hop",
+    "Hysteria2 Phoenix direct",
+    "Hysteria2 Iceland NAT"
+  ],
+  "machine_bytes_before": {
+    "fork": 129462,
+    "phoenix": 388844,
+    "toy": 258158
+  },
+  "machine_bytes_after": {
+    "fork": 258804,
+    "phoenix": 777613,
+    "toy": 516397
+  },
+  "global_equals_entries": true,
+  "transit_not_double_billed": true,
+  "encrypted_backup_restore": true,
+  "authority_rotated": true,
+  "old_admin_session_rejected": true,
+  "original_service": {
+    "name": "hysteria-nyro.service",
+    "active": true,
+    "enabled": true,
+    "config_and_binary_unchanged": true,
+    "udp_port": 443,
+    "original_pid": 204037,
+    "restored_pid": 213103,
+    "guarded_window_seconds": 519.306293348
+  },
+  "cleanup": {
+    "all_four_remote_run_directories_removed": true,
+    "escaped_core_found_on_fork": true,
+    "escaped_core_removed_with_pidfd": true,
+    "supervisor_subreaper_regression_passed": true
+  },
+  "evidence_limits": [
+    "Phoenix is a large-memory native arm64 host; not a 512MiB resource proof",
+    "Iceland and Japan are Alpine cgroups; not whole Debian/Ubuntu VM acceptance",
+    "The two-hour VM soak is separate and still running"
+  ],
+  "cgroup_oom_kill_delta": {
+    "toy": 0,
+    "client": 0,
+    "fork": 0
+  },
+  "existing_listeners_preserved": true,
+  "restoration_selftest_directories_removed": true
+}

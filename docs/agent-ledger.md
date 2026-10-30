@@ -32,6 +32,12 @@ D09 已接入正式 Panel 恢复与入账端点：Panel 以 `(machine_id, ledger
 
 ## 诊断与验证
 
+新分段使用 `UUIDv8.SHA256` 复合 ID，其中 UUID 的末尾 48 位是事务内持久分配的创建序号，完整 SHA-256 绑定机器、epoch、stream、scope、周期及起点；即使明细压缩后，同一 K 篡改这些归属仍会被拒绝。它与结算时分配的 `close_seq` 独立：不同 stream 的旧区间可以稍后关闭，Panel 以创建序号区间压缩已关闭身份，换关闭序号重放同一 ID 会被拒绝。尚未关闭的创建序号保留为区间空洞；不能按时间切线丢弃合法离线补报。旧 Agent 的 UUIDv4 分段继续精确去重，旧关闭明细作为迁移墓碑保留；所有 Agent 升级后，新增历史才获得该压缩能力。升级顺序为先 Panel、后 Agent。Agent 正常启动时在事务内将旧账本升级为 schema v2，保留旧身份、累计和未 ACK 数据；旧程序的版本门禁会拒绝打开 v2，避免丢失创建序号，因此升级后不能降级到旧 Agent。
+
+含新格式分段的关闭凭据使用 v2，并把已关闭创建序号的规范区间纳入 HMAC；最多 256 个不相邻区间，超限会停止该事务并保留待确认数据。恢复旧备份时，管理员必须按该凭据完整覆盖缺失的关闭前缀；验证通过后，在同一事务恢复去重区间，继续保留尚未关闭的离线空洞，不补造丢失字节。v1 凭据仍可处理旧账本恢复，但恢复断档后无法验证归属的未知 UUIDv4 历史会隔离为 `unknown_legacy_history`，不按当前策略猜测入账。
+
+管理员可经 `GET/PUT /api/admin/traffic/retention` 读取和调整保留设置；PUT 需要登录会话及 `X-CSRF-Token`。默认 `raw_days=7`、`raw_rows_per_machine=10000`、`closed_rows_per_machine=1024`、`hour_days=7`、`day_days=90`、`month_months=24`；下次入账时分批清理。原始报告按天数和条数限制，新格式关闭明细压缩为去重区间；未关闭段和未解决的恢复断档不受日志保留期影响。小时、日、月汇总按接收时刻的 UTC 桶记录增量，`estimated=true` 表示观察桶，`backfilled=true` 表示收到超过一小时的迟到区间；它们不能用于还原离线期间的逐小时曲线。
+
 `control-agent ledger --data-dir /path/to/agent` 可在常驻 Agent 运行时读取一致诊断，不启动 Core、不重建数据库：包括 epoch、已分配关闭序号、最高回执、pending/final 数量、可用磁盘、最近 128 条诊断事件及最多 32 个待确认段预览。预览不代表全部历史。每分钟检查磁盘，低于 16MiB 时告警；采样失败只在状态改变时记录日志。未 ACK 数据不会为了腾空间而删除，SQLite 已释放页可供后续累计复用。
 
 本地针对性验证：`go test ./internal/quantity ./internal/period ./internal/protocol ./internal/security ./internal/agent/ledger ./internal/agent ./internal/core/xray ./internal/storage ./internal/control ./cmd/agent`。子进程在样本和 ACK 提交前后直接退出，核对恢复、重复报告、部分失败、序号缺口及证明保存；另用 SQLite 拒写与提交故障注入检查水位不推进。这些是进程中断／写入故障测试，不是物理断电或真实磁盘耗尽实验。

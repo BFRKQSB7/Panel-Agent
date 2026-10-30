@@ -48,6 +48,9 @@ type TrafficRecoveryGap struct {
 // range that is still present in Panel or explicitly held by the Agent. No
 // bytes are added to usage by this operation.
 func (s *Store) RecordTrafficRecoveryGap(ctx context.Context, input TrafficRecoveryGapInput, now time.Time) error {
+	if input.Receipt.Version == 2 && input.LastSeq != input.Receipt.ClosedThrough {
+		return ErrTrafficGapRange
+	}
 	if !security.IsUUIDv4(input.MachineID) || !security.IsUUIDv4(input.LedgerEpoch) || input.FirstSeq == 0 || input.LastSeq < input.FirstSeq || input.LastSeq > 1<<63-1 || input.AgentAllocated < input.LastSeq || input.Receipt.ClosedThrough < input.LastSeq || input.Receipt.ClosedThrough > input.AgentAllocated {
 		return ErrTrafficGapRange
 	}
@@ -145,6 +148,49 @@ func (s *Store) RecordTrafficRecoveryGap(ctx context.Context, input TrafficRecov
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE traffic_ledgers SET allocated_close_seq=?,closed_through=?,reconciliation_pending=?,updated_at=? WHERE machine_id=?`, int64(allocated), int64(input.LastSeq), pending, now.Format(time.RFC3339Nano), input.MachineID); err != nil {
 		return err
+	}
+	if input.Receipt.Version == 2 {
+		ranges, err := security.ParseClosedOrdinals(input.Receipt.ClosedOrdinals)
+		if err != nil {
+			return ErrTrafficGapEvidence
+		}
+		for _, r := range ranges {
+			if err = retireOrdinalRangeTx(ctx, tx, input.MachineID, input.LedgerEpoch, r.First, r.Last); err != nil {
+				return err
+			}
+		}
+		// Proof may cover a cumulative K present in the old backup whose final
+		// was acknowledged later. It is closed evidence, never a new charge.
+		rows, err := tx.QueryContext(ctx, `SELECT segment_id FROM traffic_segments WHERE machine_id=? AND ledger_epoch=?`, input.MachineID, input.LedgerEpoch)
+		if err != nil {
+			return err
+		}
+		var retired []string
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				break
+			}
+			ordinal := protocol.TrafficOrdinal(id)
+			for _, r := range ranges {
+				if ordinal >= r.First && ordinal <= r.Last {
+					retired = append(retired, id)
+					break
+				}
+			}
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for _, id := range retired {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM traffic_segments WHERE machine_id=? AND ledger_epoch=? AND segment_id=?`, input.MachineID, input.LedgerEpoch, id); err != nil {
+				return err
+			}
+		}
 	}
 	if err := s.refreshAllMachineDesiredTx(ctx, tx); err != nil {
 		return err

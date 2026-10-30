@@ -2,6 +2,21 @@
 
 Run **go test ./internal/core/xray** and then **pwsh -NoProfile -File ./bench/run-d01-smoke.ps1** from the repository root. The default smoke requires Go 1.26 or newer, PowerShell 7, the existing Debian WSL distribution, and **curl.exe**; it uses ports 10085, 10808, 18080, 18443, and 18444. It preserves the Debian running/stopped state and never changes **.wslconfig**. The same runner also supports the SSH test-host mode below. Xray binaries, generated credentials, logs, caches, and temporary configs stay under the ignored **bench/.work/** directory or a unique <code>/tmp/panel-agent-d01-*</code> directory.
 
+## 长时间测试的外部控制保护
+
+Linux 的 `bench/guarded-run` 在私有进程组内启动测试。结果目录必须是项目内尚不存在的目录；控制方每分钟从外部更新该目录的 `lease`，停止更新 180 秒即终止整组测试进程，10 秒后强制结束；绝对时限独立生效。测试脚本内部不得自行续期，否则无法检测控制方失联。`status.json` 保留完成、失败、失联或超时原因，失联中断不计长稳通过。
+
+```sh
+go build -o .work/guarded-run ./bench/guarded-run
+sudo sh bench/guarded-run/smoke.sh .work/guarded-run
+.work/guarded-run -dir .work/guard-example -lease-seconds 180 -max-seconds 9000 -- sh path/to/test.sh
+# 控制方在另一个终端续期，或创建 stop 文件要求立即停止：
+touch .work/guard-example/lease
+touch .work/guard-example/stop
+```
+
+可重复传入 `-unmount 项目内目录`，退出时只释放该目录上实际挂载的 tmpfs；不会卸载其他文件系统或删除业务数据。守护进程使用 Linux subreaper 接管脱离进程组后成为孤儿的测试子进程，通过 pidfd 核对归属后结束并回收，避免独立 Core 会话逃出清理范围。失联、强制结束、总超时、正常完成、脱离会话和 tmpfs 释放均须先在短时隔离夹具中验证，再用于资源测试。
+
 The runner pins official [Xray v26.10.21](https://github.com/XTLS/Xray-core/releases/tag/v26.10.21) release archives and checks their SHA-256 before extraction: Linux x64 **0EEC3ED4163C273D8C8BF821F7D219E257921CF584AA3FB970715E458E631978**; Windows x64 **FC58C39EE2F2717B4C54D28D374362389E5319B20AE44AEA76EA45A5243EC827**. The server fixture has two VLESS/REALITY inbounds in one Core, sharing a generated UUID but using emails **u0001-n01** and **u0001-n02**. A generated Windows client makes four parallel requests through each Reality inbound to a temporary HTTP target bound to the Debian guest address. The fixture's Freedom rule permits only that guest **/32**, TCP, port **18080**. The [Xray REALITY configuration](https://xtls.github.io/en/config/transports/reality.html) and [StatsService counters](https://xtls.github.io/en/config/stats.html) are generated only for this isolated run.
 
 The Go adapter in **internal/core/xray** connects only to a literal loopback IP because Xray's local StatsService uses plaintext gRPC. **QueryCounter** sends **Reset=false**, then selects the exact returned stat name because Xray may return other names matching the query pattern. A missing exact name is an error; the restart check treats only that specific response as zero. The runner identifies a Core process by Linux PID plus process start time; Xray does not expose a persistent Core instance ID through this API. The observed restart produced a new process identity and zeroed both users' in-memory counters.

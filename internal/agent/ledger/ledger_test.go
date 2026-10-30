@@ -87,6 +87,18 @@ func TestAtomicSourceWatermarkGenerationAndDiskFailure(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	s := openBook(t, dir)
+	var schemaVersion int
+	must(t, s.db.QueryRow("PRAGMA user_version").Scan(&schemaVersion))
+	if schemaVersion != 2 {
+		t.Fatal("old readers could overwrite creation metadata")
+	}
+	_, err := s.db.Exec("PRAGMA user_version=3")
+	must(t, err)
+	if _, err = Inspect(ctx, dir); !errors.Is(err, ErrLedger) {
+		t.Fatalf("future ledger accepted by candidate check: %v", err)
+	}
+	_, err = s.db.Exec("PRAGMA user_version=2")
+	must(t, err)
 	must(t, s.RegisterSource(ctx, source, 1, instant("2024-01-30T00:00:00Z"), true))
 	first := sample("2024-01-30T00:00:05Z", 100)
 	must(t, s.Ingest(ctx, first))
@@ -96,6 +108,9 @@ func TestAtomicSourceWatermarkGenerationAndDiskFailure(t *testing.T) {
 	must(t, s.Ingest(ctx, first))
 	recoverBook(t, s, nil)
 	r := report(t, s)
+	if len(r.Segments) != 1 || protocol.TrafficOrdinal(r.Segments[0].Key.SegmentID) != 1 {
+		t.Fatalf("creation ordinal lost after restart: %+v", r)
+	}
 	if len(r.Segments) != 1 || r.Segments[0].Totals.Uplink != 100 {
 		t.Fatal("restart/replay double charged")
 	}
@@ -111,7 +126,7 @@ func TestAtomicSourceWatermarkGenerationAndDiskFailure(t *testing.T) {
 		t.Fatal("uncommitted watermark advanced")
 	}
 	must(t, s.db.PingContext(ctx))
-	_, err := s.db.Exec("PRAGMA query_only=ON")
+	_, err = s.db.Exec("PRAGMA query_only=ON")
 	must(t, err)
 	if s.Ingest(ctx, next) == nil {
 		t.Fatal("SQLite write rejection ignored")

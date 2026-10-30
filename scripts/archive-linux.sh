@@ -5,11 +5,16 @@ source_dir=$1
 archive=$2
 epoch=$3
 case "$epoch" in ''|*[!0-9]*) exit 2;; esac
-run=$(mktemp -d /var/tmp/panel-agent-release-XXXXXXXX)
-trap 'case "$run" in /var/tmp/panel-agent-release-*) rm -rf -- "$run";; esac' EXIT HUP INT TERM
-cp -R "$source_dir/." "$run/"
-find "$run" -type f -exec chmod 644 {} +
-find "$run" -type d -exec chmod 755 {} +
-chmod 755 "$run/control" "$run/control-agent" "$run/panel-agent-installer" "$run/xray" "$run/install.sh" "$run/uninstall.sh" "$run/cleanup.sh"
-if [ -f "$run/hysteria" ]; then chmod 755 "$run/hysteria"; fi
-tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "$archive" -C "$run" .
+parent=$(cd "$(dirname "$archive")" && pwd)
+run=$(mktemp -d "$parent/.archive-XXXXXXXX")
+trap 'case "$run" in "$parent"/.archive-*) rm -rf -- "$run";; esac' EXIT HUP INT TERM
+# Set archive modes explicitly: Windows-mounted source chmod is not reliable.
+cd "$source_dir"
+find . -type d -print0 | sort -z > "$run/directories"
+find . -type f ! -path ./control ! -path ./control-agent ! -path ./panel-agent-installer ! -path ./xray ! -path ./hysteria ! -path ./install.sh ! -path ./uninstall.sh ! -path ./cleanup.sh -print0 | sort -z > "$run/files"
+tar --mtime="@$epoch" --owner=0 --group=0 --numeric-owner --mode=0755 --no-recursion --null -cf "$run/bundle.tar" -T "$run/directories"
+tar --mtime="@$epoch" --owner=0 --group=0 --numeric-owner --mode=0644 --null -rf "$run/bundle.tar" -T "$run/files"
+set -- ./control ./control-agent ./panel-agent-installer ./xray ./install.sh ./uninstall.sh ./cleanup.sh
+if [ -f ./hysteria ]; then set -- "$@" ./hysteria; fi
+tar --mtime="@$epoch" --owner=0 --group=0 --numeric-owner --mode=0755 -rf "$run/bundle.tar" "$@"
+gzip -n -c "$run/bundle.tar" > "$archive"

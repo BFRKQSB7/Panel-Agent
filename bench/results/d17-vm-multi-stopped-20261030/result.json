@@ -1,0 +1,35 @@
+{
+  "result": "STOPPED_BY_USER",
+  "accepted_as_two_hour_pass": false,
+  "stop_reason": "user_requested_stop",
+  "terminal_client_log": {
+    "node": "vm-reality-0",
+    "error": "HTTP EOF",
+    "timing": "after last recorded progress; precise ordering relative to shutdown is not established",
+    "classification": "retained without treating this interrupted run as a pass"
+  },
+  "guard": {
+    "reason": "controller_stopped",
+    "exit_code": 130,
+    "elapsed_seconds": 4213.307503152
+  },
+  "soak": {
+    "elapsed_seconds": 3750.0,
+    "workers": 5,
+    "requests": 16962,
+    "response_bytes": 35196150,
+    "last_progress": "VM_SOAK_PROGRESS elapsed_seconds=3750.0 workers=5 requests=16962 response_bytes=35196150"
+  },
+  "business_and_restore": {
+    "before_requests": 160,
+    "after_requests": 160,
+    "restore": "encrypted=true authority_rotated=true old_session_invalidated=true",
+    "accounting": "four machines, 20 users, 8 active entries, global equals user-entry sum"
+  },
+  "midpoint": {
+    "oom_kill": 0,
+    "agent_restarts": 0,
+    "captured": true
+  },
+  "scope": "All evidence and generated files are inside this project. The run was intentionally stopped before the 7200-second soak and therefore does not establish long-stability or final release acceptance."
+}

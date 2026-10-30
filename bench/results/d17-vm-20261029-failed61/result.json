@@ -1,0 +1,72 @@
+{
+  "status": "FAIL",
+  "target_soak_seconds": 7200,
+  "last_successful_progress_seconds": 3630,
+  "last_successful_http_requests": 17066,
+  "last_successful_http_response_bytes": 35411950,
+  "failure": "vm-reality-arm-hop HTTP GET controlled origin: EOF",
+  "cause": "unconfirmed",
+  "guard": {
+    "elapsed_seconds": 3983.084102482,
+    "exit_code": 1,
+    "reason": "test_failed",
+    "started_at": "2026-10-30T00:59:43.396725292Z",
+    "updated_at": "2026-10-30T02:06:06.480827481Z"
+  },
+  "states": {
+    "22280": {
+      "generation": 1,
+      "instance_id": "fcbcbe2c-4f42-4e07-a0fd-4ae16aa8552a",
+      "process": {
+        "pid": 1023,
+        "start_ticks": "8405",
+        "config_path": "/var/lib/panel-agent/agent/core/config-bc01f98b493b5c0480ac36772eca62adb0aafc365094acab0e1df17c64177da5.json",
+        "boot_id": "45244c69-cc3e-44ec-bbc8-0162cc138542"
+      },
+      "identity_unchanged": true,
+      "oom_kill": 0,
+      "agent_restarts": 0
+    },
+    "22281": {
+      "generation": 2,
+      "instance_id": "137a9d89-5558-43e7-9760-f6f6b038312d",
+      "process": {
+        "pid": 838,
+        "start_ticks": "11984",
+        "config_path": "/var/lib/panel-agent/agent/core/config-6bf56e9dc8d5e393b54aa024f3e522004e4331ab6ed7a10396c03ebdb12ee7a1.json",
+        "boot_id": "68f03ec7-c760-4d82-af33-b47de7dc4661"
+      },
+      "identity_unchanged": true,
+      "oom_kill": 0,
+      "agent_restarts": 0
+    },
+    "22282": {
+      "generation": 1,
+      "instance_id": "8983107f-a41b-4043-bf30-69055a35b40b",
+      "process": {
+        "pid": 807,
+        "start_ticks": "8534",
+        "config_path": "/var/lib/panel-agent/agent/core/config-3ff2303855ab20486904e8acad0bef06c6ec7a06b3e83052a2699f9d325461ac.json",
+        "boot_id": "3817bf89-b2d9-44a9-9ef1-3b539b177bc3"
+      },
+      "identity_unchanged": true,
+      "oom_kill": 0,
+      "agent_restarts": 0
+    },
+    "22290": {
+      "generation": 1,
+      "instance_id": "01d00a95-2a87-4be7-9296-7eb560efe50a",
+      "process": {
+        "pid": 653,
+        "start_ticks": "9849",
+        "config_path": "/var/lib/panel-agent/agent/core/config-98227e8b6be831f66005a9426e75fd62d14d20bc6a33e9ad06b5493fa2938b6b.json",
+        "boot_id": "c4a36cda-9579-4144-abca-03f54469e793"
+      },
+      "identity_unchanged": true,
+      "oom_kill": 0,
+      "agent_restarts": 0
+    }
+  },
+  "origin_tls_timeout_observed": true,
+  "two_hour_acceptance": false
+}

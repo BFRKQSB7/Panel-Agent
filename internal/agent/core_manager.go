@@ -285,6 +285,7 @@ func (m *CoreManager) health(ctx context.Context, process coreProcess, record *c
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	var lastErr error
+	var healthySince time.Time
 	for {
 		actual, err := inspectCoreProcess(process.PID, m.binary)
 		if err != nil || actual != process || process.ConfigPath != m.configPath(record) {
@@ -303,17 +304,31 @@ func (m *CoreManager) health(ctx context.Context, process coreProcess, record *c
 			probeContext, probeCancel := context.WithTimeout(ctx, 400*time.Millisecond)
 			stats, err := xray.DialStats(probeContext, "127.0.0.1:10085")
 			if err == nil {
-				uptime, pingErr := stats.Uptime(probeContext)
+				// GetSysStats reads runtime.MemStats and can stop the Core while
+				// paging on small machines. Probe the non-resetting accounting API.
+				value, pingErr := stats.QueryCounter(probeContext, "user>>>__panel_agent_health__>>>traffic>>>uplink")
 				_ = stats.Close()
-				if pingErr == nil && (!stable || uptime >= 1) {
-					probeCancel()
-					return nil
+				if pingErr == nil && value < 0 {
+					pingErr = errors.New("invalid Core health counter")
+				}
+				if errors.Is(pingErr, xray.ErrStatNotFound) || pingErr == nil && value >= 0 {
+					if healthySince.IsZero() {
+						healthySince = time.Now()
+					}
+					if !stable || time.Since(healthySince) >= time.Second {
+						probeCancel()
+						return nil
+					}
+					pingErr = nil
 				}
 				lastErr = pingErr
 			} else {
 				lastErr = err
 			}
 			probeCancel()
+		}
+		if lastErr != nil {
+			healthySince = time.Time{}
 		}
 		timer := time.NewTimer(100 * time.Millisecond)
 		select {

@@ -238,6 +238,10 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 	if err = s.refreshAllMachineDesiredTx(ctx, tx); err != nil {
 		return response, fmt.Errorf("refresh quota restrictions after traffic recovery: %w", err)
 	}
+	claims, err := trafficReceiptClaims(ctx, tx, ledger)
+	if err != nil {
+		return response, err
+	}
 	if err = tx.Commit(); err != nil {
 		return response, fmt.Errorf("commit traffic recovery: %w", err)
 	}
@@ -245,10 +249,7 @@ func (s *Store) RecoverTraffic(ctx context.Context, machineID string, request pr
 	response.LedgerEpoch = ledger.LedgerEpoch
 	response.Resume = true
 	if ledger.ClosedThrough > 0 {
-		receipt, signErr := security.SignClosedReceipt(s.masterKey, security.ClosedClaims{
-			Version: 1, InstallationID: ledger.InstallationID, MachineID: machineID,
-			LedgerEpoch: ledger.LedgerEpoch, ClosedThrough: ledger.ClosedThrough,
-		})
+		receipt, signErr := security.SignClosedReceipt(s.masterKey, claims)
 		if signErr != nil {
 			return protocol.TrafficRecoveryResponse{}, signErr
 		}
@@ -350,20 +351,30 @@ func applyTrafficUsage(ctx context.Context, tx *sql.Tx, segment protocol.Traffic
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO traffic_usage
-			(machine_id,ledger_epoch,scope_key,period_id,uplink,downlink,updated_at)
-			VALUES(?,?,?,?,?,?,?) ON CONFLICT(machine_id,ledger_epoch,scope_key,period_id)
-			DO UPDATE SET uplink=excluded.uplink,downlink=excluded.downlink,updated_at=excluded.updated_at`,
-			segment.Key.MachineID, segment.Key.LedgerEpoch, p.Scope.Key(), p.ID, int64(up), int64(down), trafficTextTime(now)); err != nil {
+			(machine_id,ledger_epoch,scope_key,period_id,uplink,downlink,updated_at,period_end)
+			VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(machine_id,ledger_epoch,scope_key,period_id)
+			DO UPDATE SET uplink=excluded.uplink,downlink=excluded.downlink,updated_at=excluded.updated_at,period_end=excluded.period_end`,
+			segment.Key.MachineID, segment.Key.LedgerEpoch, p.Scope.Key(), p.ID, int64(up), int64(down), trafficTextTime(now), trafficTextTime(p.End)); err != nil {
 			return err
 		}
 	}
-	return nil
+	return recordTrafficRollups(ctx, tx, segment, delta, now)
 }
 
 func (s *Store) ingestTrafficRow(ctx context.Context, tx *sql.Tx, ledger *trafficLedger, segment protocol.TrafficSegment, now time.Time) (protocol.TrafficOutcome, error) {
 	outcome := protocol.TrafficOutcome{Key: segment.Key}
 	if err := segment.Validate(); err != nil {
 		return outcome, &trafficRowReject{code: trafficErrorInvalid}
+	}
+	if protocol.TrafficOrdinal(segment.Key.SegmentID) != 0 {
+		var alias int
+		prefix := segment.Key.SegmentID[:36]
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM traffic_segments WHERE machine_id=? AND ledger_epoch=? AND substr(segment_id,1,36)=? AND segment_id<>? UNION ALL SELECT 1 FROM traffic_closed_segments WHERE machine_id=? AND ledger_epoch=? AND substr(segment_id,1,36)=? AND segment_id<>?)`, ledger.MachineID, ledger.LedgerEpoch, prefix, segment.Key.SegmentID, ledger.MachineID, ledger.LedgerEpoch, prefix, segment.Key.SegmentID).Scan(&alias); err != nil {
+			return outcome, err
+		}
+		if alias != 0 {
+			return outcome, &trafficRowReject{code: trafficErrorSegmentConflict}
+		}
 	}
 	closed, err := loadTrafficSegment(ctx, tx, `SELECT body FROM traffic_closed_segments
 		WHERE machine_id=? AND ledger_epoch=? AND stream_id=? AND segment_id=?`,
@@ -376,6 +387,31 @@ func (s *Store) ingestTrafficRow(ctx context.Context, tx *sql.Tx, ledger *traffi
 		return outcome, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return outcome, err
+	}
+	if ordinal := protocol.TrafficOrdinal(segment.Key.SegmentID); ordinal != 0 {
+		var retired int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM traffic_retired_ordinals WHERE machine_id=? AND ledger_epoch=? AND first<=? AND last>=?`, ledger.MachineID, ledger.LedgerEpoch, ordinal, ordinal).Scan(&retired); err != nil {
+			return outcome, err
+		}
+		if retired != 0 {
+			if !segment.Finalized || segment.CloseSeq > ledger.ClosedThrough {
+				return outcome, &trafficRowReject{code: trafficErrorClosedConflict}
+			}
+			outcome.Status, outcome.CloseSeq = "retired", segment.CloseSeq
+			return outcome, nil
+		}
+	}
+	if segment.Finalized && segment.CloseSeq <= ledger.ClosedThrough {
+		var active int
+		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM traffic_segments WHERE machine_id=? AND ledger_epoch=? AND stream_id=? AND segment_id=?`, segment.Key.MachineID, segment.Key.LedgerEpoch, segment.Key.StreamID, segment.Key.SegmentID).Scan(&active)
+		if err != nil {
+			return outcome, err
+		}
+		if active != 0 {
+			return outcome, &trafficRowReject{code: trafficErrorCloseSeqConflict}
+		}
+		outcome.Status, outcome.CloseSeq = "retired", segment.CloseSeq
+		return outcome, nil
 	}
 	if owner, ownerErr := segmentIDOwner(ctx, tx, segment.Key.MachineID, segment.Key.LedgerEpoch, segment.Key.SegmentID); ownerErr == nil && owner != segment.Key {
 		return outcome, &trafficRowReject{code: trafficErrorSegmentConflict}
@@ -394,11 +430,23 @@ func (s *Store) ingestTrafficRow(ctx context.Context, tx *sql.Tx, ledger *traffi
 		if err = protocol.ValidateCumulativeUpdate(previous, segment); err != nil {
 			return outcome, &trafficRowReject{code: trafficErrorSegmentConflict}
 		}
-	} else if err = validateTrafficPolicies(ctx, tx, segment); err != nil {
-		if errors.Is(err, ErrTrafficPolicy) {
-			return outcome, &trafficRowReject{code: trafficErrorUnknownPolicy}
+	}
+	if !hasPrevious {
+		if protocol.TrafficOrdinal(segment.Key.SegmentID) == 0 {
+			var gaps int
+			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM traffic_recovery_gaps WHERE machine_id=? AND ledger_epoch=?`, ledger.MachineID, ledger.LedgerEpoch).Scan(&gaps); err != nil {
+				return outcome, err
+			}
+			if gaps > 0 {
+				return outcome, &trafficRowReject{code: "unknown_legacy_history"}
+			}
 		}
-		return outcome, err
+		if err = validateTrafficPolicies(ctx, tx, segment); err != nil {
+			if errors.Is(err, ErrTrafficPolicy) {
+				return outcome, &trafficRowReject{code: trafficErrorUnknownPolicy}
+			}
+			return outcome, err
+		}
 	}
 	if segment.Finalized {
 		owner, ownerErr := closeSeqOwner(ctx, tx, segment.Key.MachineID, segment.Key.LedgerEpoch, segment.CloseSeq)
@@ -571,6 +619,9 @@ func (s *Store) IngestTraffic(ctx context.Context, machineID string, request pro
 	if err = writeTrafficLedger(ctx, tx, ledger, now); err != nil {
 		return ack, fmt.Errorf("persist traffic ledger: %w", err)
 	}
+	if err = compactTrafficTx(ctx, tx, ledger, now); err != nil {
+		return ack, fmt.Errorf("compact acknowledged traffic history: %w", err)
+	}
 	if err = s.refreshAllMachineDesiredTx(ctx, tx); err != nil {
 		return ack, fmt.Errorf("refresh quota restrictions after traffic ingest: %w", err)
 	}
@@ -580,14 +631,15 @@ func (s *Store) IngestTraffic(ctx context.Context, machineID string, request pro
 			ack.Outcomes[i].Committed = nil
 		}
 	}
+	claims, err := trafficReceiptClaims(ctx, tx, ledger)
+	if err != nil {
+		return ack, err
+	}
 	if err = tx.Commit(); err != nil {
 		return protocol.TrafficACK{}, fmt.Errorf("commit traffic ingest: %w", err)
 	}
 	if ledger.ClosedThrough > 0 {
-		receipt, signErr := security.SignClosedReceipt(s.masterKey, security.ClosedClaims{
-			Version: 1, InstallationID: installation, MachineID: machineID,
-			LedgerEpoch: ledger.LedgerEpoch, ClosedThrough: ledger.ClosedThrough,
-		})
+		receipt, signErr := security.SignClosedReceipt(s.masterKey, claims)
 		if signErr != nil {
 			return protocol.TrafficACK{}, signErr
 		}

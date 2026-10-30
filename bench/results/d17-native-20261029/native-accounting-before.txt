@@ -1,0 +1,4 @@
+NATIVE_MACHINE name=native-phoenix used=388844 generation=3
+NATIVE_MACHINE name=native-fork used=129462 generation=2
+NATIVE_MACHINE name=native-toy used=258158 generation=3
+NATIVE_ACCOUNTING_OK users=20 entry_nodes=3 global_equals_entries=true transit_not_double_billed=true

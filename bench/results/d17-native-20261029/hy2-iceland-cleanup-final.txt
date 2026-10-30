@@ -1,0 +1,13 @@
+low 0
+high 0
+max 297
+oom 0
+oom_kill 0
+oom_group_kill 0
+sock_throttled 76
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.1:8081          0.0.0.0:*               LISTEN      65151/filepanel
+tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN      61964/nginx.conf
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      529/sshd [listener]
+tcp        0      0 :::22                   :::*                    LISTEN      529/sshd [listener]
